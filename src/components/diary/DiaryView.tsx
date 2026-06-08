@@ -174,6 +174,17 @@ export default function DiaryView() {
     if (diaryPath) { await openNote(diaryPath); setOpenNotePath(diaryPath) }
   }
 
+  // Click date → auto-create + open editor
+  const handleSelectDate = async (ds: string) => {
+    setSelectedDate(ds)
+    // Pre-create and open
+    try {
+      let diary = await window.mynote.diary.get(ds)
+      if (!diary) diary = await window.mynote.diary.create(ds)
+      if (diary) { await openNote(diary.path); setOpenNotePath(diary.path) }
+    } catch {}
+  }
+
   const dateLabel = format(new Date(selectedDate), 'M月d日 EEEE')
 
   // ---- Render ----
@@ -204,7 +215,7 @@ export default function DiaryView() {
               const ds = format(day, 'yyyy-MM-dd')
               const sel = ds === selectedDate
               return (
-                <button key={`${wi}-${di}`} onClick={() => setSelectedDate(ds)}
+                <button key={`${wi}-${di}`} onClick={() => handleSelectDate(ds)}
                   className={`calendar-day ${!isSameMonth(day, currentMonth) ? 'other-month' : ''} ${
                     isToday(day) ? 'today' : ''} ${diaryDates.has(ds) ? 'has-entry' : ''} ${
                     sel ? '!bg-accent-500 !text-white font-semibold' : ''}`}>
@@ -291,9 +302,9 @@ export default function DiaryView() {
                 const h = (durMin / TOTAL_MIN) * TOTAL_HEIGHT
                 return (
                   <div key={idx} className="absolute left-14 right-6"
-                    style={{ top, minHeight: Math.max(32, h) }}>
+                    style={{ top, height: Math.max(32, h) }}>
                     <div className="group relative bg-accent-50/60 border border-accent-200/60 rounded-lg px-3 py-1.5
-                                    hover:bg-accent-100 transition-colors h-full">
+                                    hover:bg-accent-100 transition-colors h-full flex flex-col">
                       <div className="flex items-start justify-between">
                         <span className="text-[11px] font-medium text-accent-700 bg-accent-100 px-1.5 py-0.5 rounded">
                           {fmtRange(block.startTime, block.endTime)}
