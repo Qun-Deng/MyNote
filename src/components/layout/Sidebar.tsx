@@ -33,7 +33,7 @@ interface FileDialogState {
 }
 
 const navItems: { id: ActiveView; label: string; icon: React.ReactNode }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+  { id: 'dashboard', label: '仪表盘', icon: <LayoutDashboard className="w-4 h-4" /> },
   { id: 'diary', label: '日记', icon: <Calendar className="w-4 h-4" /> },
   { id: 'todo', label: '待办', icon: <CheckSquare className="w-4 h-4" /> },
   { id: 'knowledge', label: '知识库', icon: <Library className="w-4 h-4" /> },

@@ -327,7 +327,6 @@ export default function DiaryView() {
             <div className="flex flex-col items-center justify-center h-full text-surface-400">
               <Clock className="w-12 h-12 text-surface-200 mb-3" />
               <p className="text-sm">该日暂无时间记录</p>
-              <p className="text-xs mt-1">点击"添加时间块"或在日记中写入 [HH:MM-HH:MM] 描述</p>
             </div>
           ) : (
             <div className="relative mx-6 my-6" style={{ height: TOTAL_HEIGHT }}>
