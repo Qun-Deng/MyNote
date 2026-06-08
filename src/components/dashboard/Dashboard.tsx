@@ -1,11 +1,20 @@
-import { CalendarDays, CheckSquare, FileText, Plus, Clock } from 'lucide-react'
+import { CalendarDays, CheckSquare, FileText, Plus, Clock, Trash2, Check, Square } from 'lucide-react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useEffect, useState } from 'react'
-import type { NoteMeta, TodoItem } from '../../../shared/types'
+import type { NoteMeta } from '../../../shared/types'
 import { useUIStore } from '../../stores/uiStore'
 import { useNoteStore } from '../../stores/noteStore'
 import { useVaultStore } from '../../stores/vaultStore'
+
+interface TodoPageItem {
+  id: string
+  content: string
+  completed: boolean
+  section: string
+  created_date: string
+  created_at: string
+}
 
 export default function Dashboard() {
   const today = new Date()
@@ -13,10 +22,12 @@ export default function Dashboard() {
   const dateStr = format(today, 'yyyy年M月d日 EEEE', { locale: zhCN })
 
   const [recentNotes, setRecentNotes] = useState<NoteMeta[]>([])
-  const [pendingTodos, setPendingTodos] = useState<TodoItem[]>([])
+  const [todoItems, setTodoItems] = useState<TodoPageItem[]>([])
   const [todayDiary, setTodayDiary] = useState<NoteMeta | null>(null)
   const [newNoteDialogOpen, setNewNoteDialogOpen] = useState(false)
   const [newNoteTitle, setNewNoteTitle] = useState('')
+  const [addingTodo, setAddingTodo] = useState(false)
+  const [newTodoContent, setNewTodoContent] = useState('')
 
   const setActiveView = useUIStore((s) => s.setActiveView)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
@@ -25,17 +36,36 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [notes, todos, diary] = await Promise.all([
+      const [notes, diary, todoPage] = await Promise.all([
         window.mynote.notes.recent().catch(() => []),
-        window.mynote.todos.list({ completed: false }).catch(() => []),
         window.mynote.diary.get(format(today, 'yyyy-MM-dd')).catch(() => null),
+        window.mynote.todoPage.list().catch(() => []),
       ])
       setRecentNotes(notes)
-      setPendingTodos(todos)
       setTodayDiary(diary)
+      const allTodos = todoPage as TodoPageItem[]
+      setTodoItems(allTodos.filter((t: TodoPageItem) => !t.completed && t.section === 'today'))
     } catch {
       // Silently fail — data will show as empty
     }
+  }
+
+  const handleTodoToggle = async (item: TodoPageItem) => {
+    await window.mynote.todoPage.toggle(item.id)
+    loadData()
+  }
+
+  const handleTodoDelete = async (item: TodoPageItem) => {
+    await window.mynote.todoPage.delete(item.id)
+    loadData()
+  }
+
+  const handleTodoAdd = async () => {
+    if (!newTodoContent.trim()) return
+    await window.mynote.todoPage.add(newTodoContent.trim(), 'today')
+    setNewTodoContent('')
+    setAddingTodo(false)
+    loadData()
   }
 
   useEffect(() => {
@@ -114,7 +144,7 @@ export default function Dashboard() {
           />
           <QuickCard
             icon={<CheckSquare className="w-4 h-4" />}
-            label={`待办 (${pendingTodos.length})`}
+            label={`今日待办 (${todoItems.length})`}
             color="amber"
             onClick={handleTodoView}
           />
@@ -216,32 +246,90 @@ export default function Dashboard() {
             )}
           </section>
 
-          {/* Pending Todos */}
+          {/* Today's Todos */}
           <section className="card">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="card-title">待办事项</h2>
-              <span className="text-xs text-surface-400">
-                <Clock className="w-3 h-3 inline mr-1" />
-                {pendingTodos.length} 条待办
-              </span>
+              <h2 className="card-title">今日待办</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-surface-400">
+                  {todoItems.length} 条
+                </span>
+                <button
+                  onClick={() => { setAddingTodo(true); setNewTodoContent('') }}
+                  className="p-1 hover:bg-surface-100 rounded transition-colors"
+                  title="添加待办"
+                >
+                  <Plus className="w-4 h-4 text-surface-400" />
+                </button>
+              </div>
             </div>
-            {pendingTodos.length === 0 ? (
+            {todoItems.length === 0 && !addingTodo ? (
               <div className="text-center py-4">
                 <CheckSquare className="w-8 h-8 text-surface-200 mx-auto mb-2" />
-                <p className="text-xs text-surface-400">所有待办已完成 🎉</p>
+                <p className="text-xs text-surface-400">今日暂无待办 ✨</p>
               </div>
             ) : (
-              <div className="space-y-1">
-                {pendingTodos.slice(0, 5).map((todo) => (
-                  <div key={todo.id} className="flex items-center gap-2 py-1 text-sm text-surface-700">
-                    <div className="w-4 h-4 border-2 border-surface-300 rounded flex-shrink-0" />
-                    <span className="truncate">{todo.content}</span>
-                  </div>
-                ))}
-                {pendingTodos.length > 5 && (
+              <div>
+                <div className="space-y-0.5">
+                  {todoItems.slice(0, 5).map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-2 py-1 text-sm text-surface-700 group hover:bg-surface-50 rounded px-1 transition-colors"
+                    >
+                      <button onClick={() => handleTodoToggle(item)} className="flex-shrink-0">
+                        {item.completed ? (
+                          <Check className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <Square className="w-4 h-4 text-surface-300 hover:text-accent-500 transition-colors" />
+                        )}
+                      </button>
+                      <span className={`truncate flex-1 ${item.completed ? 'line-through text-surface-400' : ''}`}>
+                        {item.content}
+                      </span>
+                      <button
+                        onClick={() => handleTodoDelete(item)}
+                        className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-50 text-surface-400 hover:text-red-500"
+                        title="删除"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {todoItems.length > 5 && (
                   <p className="text-xs text-surface-400 pt-1">
-                    还有 {pendingTodos.length - 5} 条待办...
+                    还有 {todoItems.length - 5} 条待办...
                   </p>
+                )}
+                {addingTodo && (
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-surface-100">
+                    <Square className="w-4 h-4 text-surface-300 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={newTodoContent}
+                      onChange={(e) => setNewTodoContent(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleTodoAdd()
+                        if (e.key === 'Escape') { setAddingTodo(false); setNewTodoContent('') }
+                      }}
+                      placeholder="输入待办…"
+                      className="flex-1 bg-white border border-surface-200 rounded-md px-2 py-1 text-sm placeholder:text-surface-400 focus:outline-none focus:border-accent-300"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleTodoAdd}
+                      disabled={!newTodoContent.trim()}
+                      className="text-xs bg-accent-500 text-white px-2 py-1 rounded font-medium hover:bg-accent-600 transition-colors disabled:opacity-50"
+                    >
+                      确认
+                    </button>
+                    <button
+                      onClick={() => { setAddingTodo(false); setNewTodoContent('') }}
+                      className="text-xs text-surface-400 hover:text-surface-600"
+                    >
+                      取消
+                    </button>
+                  </div>
                 )}
               </div>
             )}

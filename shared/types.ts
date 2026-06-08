@@ -25,6 +25,7 @@ export interface TodoItem {
   created_at: string
   completed_at: string | null
   priority: number
+  deadline: string | null
 }
 
 export interface SearchResult {
@@ -104,6 +105,18 @@ export interface IpcChannels {
   }
   'todos:extract': {
     args: [filePath: string, content: string]
+    result: void
+  }
+  'todos:add': {
+    args: [notePath: string, content: string, deadline?: string]
+    result: TodoItem
+  }
+  'todos:delete': {
+    args: [todoId: number]
+    result: void
+  }
+  'todos:update-deadline': {
+    args: [todoId: number, deadline: string | null]
     result: void
   }
 

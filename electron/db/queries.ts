@@ -20,6 +20,7 @@ export interface TodoRow {
   created_at: string
   completed_at: string | null
   priority: number
+  deadline: string | null
 }
 
 // ====== Notes ======
@@ -88,6 +89,7 @@ function rowToTodo(row: any[]): TodoRow {
     created_at: row[5] as string,
     completed_at: row[6] as string | null,
     priority: row[7] as number,
+    deadline: row[8] as string | null,
   }
 }
 
@@ -127,9 +129,9 @@ export function clearTodosForNote(notePath: string) {
 export function insertTodo(todo: Omit<TodoRow, 'id'>) {
   const db = getDatabase()
   db.run(
-    `INSERT INTO todos (note_path, content, completed, line_number, created_at, completed_at, priority)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [todo.note_path, todo.content, todo.completed, todo.line_number, todo.created_at, todo.completed_at, todo.priority]
+    `INSERT INTO todos (note_path, content, completed, line_number, created_at, completed_at, priority, deadline)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [todo.note_path, todo.content, todo.completed, todo.line_number, todo.created_at, todo.completed_at, todo.priority, todo.deadline ?? null]
   )
 }
 
@@ -153,6 +155,25 @@ export function updateTodoCompleted(todoId: number, completed: boolean) {
     'UPDATE todos SET completed = ?, completed_at = ? WHERE id = ?',
     [completed ? 1 : 0, completed ? new Date().toISOString() : null, todoId]
   )
+  saveDatabase()
+}
+
+export function getTodoById(todoId: number): TodoRow | null {
+  const db = getDatabase()
+  const result = db.exec('SELECT * FROM todos WHERE id = ?', [todoId])
+  if (result.length === 0 || result[0].values.length === 0) return null
+  return rowToTodo(result[0].values[0])
+}
+
+export function deleteTodoById(todoId: number) {
+  const db = getDatabase()
+  db.run('DELETE FROM todos WHERE id = ?', [todoId])
+  saveDatabase()
+}
+
+export function updateTodoDeadline(todoId: number, deadline: string | null) {
+  const db = getDatabase()
+  db.run('UPDATE todos SET deadline = ? WHERE id = ?', [deadline, todoId])
   saveDatabase()
 }
 
