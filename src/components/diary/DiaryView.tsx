@@ -56,11 +56,14 @@ function timeToMin(t: string) { const [h, m] = t.split(':').map(Number); return 
 function fmtRange(s: string, e: string | null) { return e ? `${s} - ${e}` : s }
 
 function insertBlockIntoContent(content: string, blockLine: string): string {
-  const re = /##\s*\[今日记录\]\s*\n/
+  // Match the ## [今日记录] header line, even if it has trailing content on the same line
+  const re = /^##\s*\[今日记录\][^\n]*/m
   const m = content.match(re)
   if (m) {
+    // Insert on a new line right after the header line
     const idx = m.index! + m[0].length
-    return content.slice(0, idx) + `${blockLine}\n` + content.slice(idx)
+    const hasTrailingNewline = content[idx] === '\n'
+    return content.slice(0, idx) + (hasTrailingNewline ? '' : '\n') + `${blockLine}\n` + content.slice(idx)
   }
   const fmEnd = content.indexOf('---\n', 3)
   if (fmEnd > -1) {
@@ -175,7 +178,9 @@ export default function DiaryView() {
       const diary = await window.mynote.diary.create(selectedDate)
       path = diary.path
       refreshTree()
-      content = ''  // fresh diary
+      // Read the actual template content instead of discarding it
+      const result = await window.mynote.notes.read(diary.path)
+      content = result?.content || ''
       setDiaryPath(path)
       setDiaryDates((prev) => new Set(prev).add(selectedDate))
     }
