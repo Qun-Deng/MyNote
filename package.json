@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "A beautiful markdown note-taking application",
   "main": "dist-electron/main.js",
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

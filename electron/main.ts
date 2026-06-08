@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
 import { registerDiaryIPC } from './ipc/diary'
 import { registerTodosIPC } from './ipc/todos'
@@ -94,7 +95,6 @@ ipcMain.handle('vault:get-path', () => {
 ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
   setVaultPath(newVaultPath)
   // Create basic directory structure
-  const fs = require('fs')
   const dirs = ['notes', 'diary', 'assets']
   for (const dir of dirs) {
     const dirPath = path.join(newVaultPath, dir)
@@ -115,7 +115,6 @@ ipcMain.handle('vault:move', async (_event, from: string, to: string) => {
   if (!vaultPath) throw new Error('Vault not initialized')
   const fromFull = path.join(vaultPath, from)
   const toFull = path.join(vaultPath, to)
-  const fs = require('fs')
   if (fs.existsSync(fromFull)) {
     const dir = path.dirname(toFull)
     if (!fs.existsSync(dir)) {
