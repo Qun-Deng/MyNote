@@ -19,7 +19,6 @@ import {
   filterSlashActions,
   getSlashTrigger,
   getTableCellPosition,
-  handleCollapsibleListClick,
   handleEditorShortcut,
   handleTableCellMouseDown,
   handleTaskItemClick,
@@ -116,11 +115,33 @@ function buildIndentDecorations(doc: ProseNode) {
       if (SKIP_PARENTS.has($pos.node(d).type.name)) return
     }
 
-    const level = computeIndentLevel(node.textContent)
+    const text = node.textContent
+    const leadingMatch = text.match(/^[\t ]+/)
+    if (!leadingMatch) return
+
+    const level = computeIndentLevel(text)
     if (level === 0) return
 
+    // Hide the leading whitespace (tab spaces become invisible) and
+    // apply the visual indicator (border + background) to the text.
+    const leadLen = leadingMatch[0].length
+    const contentStart = pos + 1              // first character of content
+    const textStart = contentStart + leadLen   // first non-whitespace character
+    const contentEnd = pos + node.nodeSize
+
+    // Decoration 1: hide the leading whitespace so only the indent
+    // indicator is visible — tab stops are rendered, not literal spaces.
+    if (leadLen > 0) {
+      decos.push(
+        Decoration.inline(contentStart, textStart, {
+          class: 'md-indent-space',
+        }),
+      )
+    }
+
+    // Decoration 2: visual indicator hugs the actual text
     decos.push(
-      Decoration.node(pos, pos + node.nodeSize, {
+      Decoration.inline(textStart, contentEnd, {
         class: `md-indent md-indent-${level}`,
       }),
     )
@@ -142,13 +163,142 @@ const markdownIndentProsePlugin = new Plugin({
   },
   props: {
     decorations(state) {
-      return indentPluginKey.getState(state)
+      try {
+        return indentPluginKey.getState(state)
+      } catch {
+        return DecorationSet.empty
+      }
     },
   },
 })
 
 // Wrap as a Milkdown plugin so it can be .use()-d in the editor chain.
 const markdownIndent = $prose(() => markdownIndentProsePlugin)
+
+// ── Collapsible (toggle) list plugin ──────────────────────────
+// Like Notion's toggle list: click the ▼/► icon to collapse/expand
+// nested children.  Uses decorations so state survives re-renders.
+
+const collapsePluginKey = new PluginKey('collapsibleList')
+
+function isCollapsibleListItem(node: ProseNode): boolean {
+  if (node.type.name !== 'list_item') return false
+  for (let i = 0; i < node.childCount; i++) {
+    const name = node.child(i).type.name
+    if (name === 'bullet_list' || name === 'ordered_list') return true
+  }
+  return false
+}
+
+const collapsibleListProsePlugin = new Plugin({
+  key: collapsePluginKey,
+  state: {
+    init() {
+      return { collapsed: new Set<number>() }
+    },
+    apply(tr, prev, _oldState, newState) {
+      const meta = tr.getMeta(collapsePluginKey)
+
+      let collapsed: Set<number> = prev.collapsed
+
+      // Map positions through doc changes so collapsed state
+      // follows its list item even when surrounding text is edited.
+      if (tr.docChanged && collapsed.size > 0) {
+        const next = new Set<number>()
+        for (const pos of collapsed) {
+          const mapped = tr.mapping.map(pos)
+          try {
+            const $pos = newState.doc.resolve(mapped)
+            const node = $pos.nodeAfter
+            if (node && isCollapsibleListItem(node) && $pos.pos === mapped) {
+              next.add(mapped)
+            }
+          } catch { /* position gone – drop it */ }
+        }
+        collapsed = next
+      }
+
+      if (meta?.togglePos !== undefined) {
+        const next = new Set(collapsed)
+        const pos = tr.docChanged ? tr.mapping.map(meta.togglePos) : meta.togglePos
+        if (next.has(pos)) {
+          next.delete(pos)
+        } else {
+          next.add(pos)
+        }
+        return { collapsed: next }
+      }
+
+      if (collapsed !== prev.collapsed) return { collapsed }
+      return prev
+    },
+  },
+  props: {
+    decorations(state) {
+      try {
+        const pluginState = collapsePluginKey.getState(state)
+        if (!pluginState || pluginState.collapsed.size === 0) return DecorationSet.empty
+
+        const decos: Decoration[] = []
+        for (const pos of pluginState.collapsed) {
+          try {
+            const $pos = state.doc.resolve(pos)
+            const node = $pos.nodeAfter
+            if (node && isCollapsibleListItem(node)) {
+              decos.push(Decoration.node(pos, pos + node.nodeSize, {
+                class: 'md-list-collapsed',
+              }))
+            }
+          } catch { /* stale position */ }
+        }
+        return decos.length > 0 ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
+      } catch {
+        return DecorationSet.empty
+      }
+    },
+    handleDOMEvents: {
+      click(view, event) {
+        const target = event.target
+        if (!(target instanceof HTMLElement)) return false
+
+        // 1) Find closest <li> ancestor
+        const li = target.closest<HTMLLIElement>('li')
+        if (!li) return false
+
+        // 2) Must have a nested ul/ol as a direct child
+        if (!li.querySelector(':scope > ul, :scope > ol')) return false
+
+        // 3) Click must be in the toggle zone — left of the first <p>
+        const firstP = li.querySelector(':scope > p')
+        const thresholdX = firstP
+          ? firstP.getBoundingClientRect().left
+          : li.getBoundingClientRect().left + 32
+        if (event.clientX >= thresholdX) return false
+
+        // 4) Find the ProseMirror list_item node position
+        const domPos = view.posAtDOM(li, 0)
+        const $pos = view.state.doc.resolve(domPos)
+        let itemPos = -1
+        for (let d = $pos.depth; d >= 0; d -= 1) {
+          if ($pos.node(d).type.name === 'list_item') {
+            itemPos = $pos.before(d)
+            break
+          }
+        }
+        if (itemPos < 0) return false
+
+        // 5) Dispatch meta transaction → plugin toggles the decoration
+        view.dispatch(view.state.tr.setMeta(collapsePluginKey, { togglePos: itemPos }))
+
+        event.preventDefault()
+        event.stopPropagation()
+        return true
+      },
+    },
+  },
+})
+
+const collapsibleList = $prose(() => collapsibleListProsePlugin)
 
 export default function MilkdownEditor({ content, onContentChange, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -258,11 +408,19 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
   const focusEditorEnd = () => {
     const editor = editorRef.current
     if (!editor) return
-    const view = editor.ctx.get(editorViewCtx)
-    const endPos = Math.max(1, view.state.doc.content.size - 1)
-    const selection = TextSelection.near(view.state.doc.resolve(endPos))
-    view.dispatch(view.state.tr.setSelection(selection).scrollIntoView())
-    view.focus()
+    try {
+      const view = editor.ctx.get(editorViewCtx)
+      if (view.hasFocus()) return
+      // Defer focus to avoid race with React event system
+      window.setTimeout(() => {
+        try {
+          const endPos = Math.max(1, view.state.doc.content.size - 1)
+          const selection = TextSelection.near(view.state.doc.resolve(endPos))
+          view.dispatch(view.state.tr.setSelection(selection).scrollIntoView())
+          view.focus()
+        } catch { /* editor may have been destroyed */ }
+      })
+    } catch { /* ctx not ready */ }
   }
 
   const handleKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -294,6 +452,7 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
       .use(emoji)
       .use(clipboard)
       .use(markdownIndent)
+      .use(collapsibleList)
       .create()
       .then((created) => {
         editor = created
@@ -327,7 +486,6 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
     const handleClick = (event: MouseEvent) => {
       const editor = editorRef.current
       if (editor && handleTaskItemClick(editor, event)) return
-      if (handleCollapsibleListClick(event)) return
       closeSlashMenu()
     }
 

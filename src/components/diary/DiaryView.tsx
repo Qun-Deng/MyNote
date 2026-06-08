@@ -56,7 +56,7 @@ function timeToMin(t: string) { const [h, m] = t.split(':').map(Number); return 
 function fmtRange(s: string, e: string | null) { return e ? `${s} - ${e}` : s }
 
 function insertBlockIntoContent(content: string, blockLine: string): string {
-  const re = /##\s*今日记录\s*\n/
+  const re = /##\s*\[今日记录\]\s*\n/
   const m = content.match(re)
   if (m) {
     const idx = m.index! + m[0].length
@@ -65,7 +65,7 @@ function insertBlockIntoContent(content: string, blockLine: string): string {
   const fmEnd = content.indexOf('---\n', 3)
   if (fmEnd > -1) {
     const insertAt = content.indexOf('\n', fmEnd + 4)
-    return content.slice(0, insertAt + 1) + `\n## 今日记录\n${blockLine}\n` + content.slice(insertAt + 1)
+    return content.slice(0, insertAt + 1) + `\n## [今日记录]\n${blockLine}\n` + content.slice(insertAt + 1)
   }
   return content + `\n${blockLine}\n`
 }
