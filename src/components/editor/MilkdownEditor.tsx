@@ -300,6 +300,60 @@ const collapsibleListProsePlugin = new Plugin({
 
 const collapsibleList = $prose(() => collapsibleListProsePlugin)
 
+// ── Tag highlight plugin ──────────────────────────────────────────
+// Detects #tag patterns in text and applies a highlight decoration
+// so tags stand out visually from normal prose.
+
+const tagHighlightPluginKey = new PluginKey('mdTagHighlight')
+
+const TAG_REGEX = /#[\w一-鿿㐀-䶿＀-￯-]+/g
+
+function buildTagDecorations(doc: ProseNode) {
+  const decos: Decoration[] = []
+
+  doc.descendants((node: ProseNode, pos: number) => {
+    if (!node.isText) return
+
+    const text = node.text ?? ''
+    let match: RegExpExecArray | null
+    TAG_REGEX.lastIndex = 0
+
+    while ((match = TAG_REGEX.exec(text)) !== null) {
+      const from = pos + match.index
+      const to = from + match[0].length
+      decos.push(
+        Decoration.inline(from, to, { class: 'md-tag' }),
+      )
+    }
+  })
+
+  return DecorationSet.create(doc, decos)
+}
+
+const tagHighlightProsePlugin = new Plugin({
+  key: tagHighlightPluginKey,
+  state: {
+    init(_, state) {
+      return buildTagDecorations(state.doc)
+    },
+    apply(tr, prev, _oldState, newState) {
+      if (!tr.docChanged) return prev
+      return buildTagDecorations(newState.doc)
+    },
+  },
+  props: {
+    decorations(state) {
+      try {
+        return tagHighlightPluginKey.getState(state)
+      } catch {
+        return DecorationSet.empty
+      }
+    },
+  },
+})
+
+const tagHighlight = $prose(() => tagHighlightProsePlugin)
+
 export default function MilkdownEditor({ content, onContentChange, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
@@ -453,6 +507,7 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
       .use(clipboard)
       .use(markdownIndent)
       .use(collapsibleList)
+      .use(tagHighlight)
       .create()
       .then((created) => {
         editor = created
