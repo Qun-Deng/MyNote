@@ -56,12 +56,15 @@ const api = {
     delete: (filePath: string) => ipcRenderer.invoke('notes:delete', filePath),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('notes:rename', oldPath, newPath),
     recent: () => ipcRenderer.invoke('notes:recent'),
+    tags: () => ipcRenderer.invoke('notes:tags'),
+    byTag: (tag: string) => ipcRenderer.invoke('notes:by-tag', tag),
   },
 
   // Diary
   diary: {
     get: (date: string) => ipcRenderer.invoke('diary:get', date),
     getMonth: (year: number, month: number) => ipcRenderer.invoke('diary:get-month', year, month),
+    getRange: (startDate: string, endDate: string) => ipcRenderer.invoke('diary:get-range', startDate, endDate),
     create: (date: string) => ipcRenderer.invoke('diary:create', date),
   },
 

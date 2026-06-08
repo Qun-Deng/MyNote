@@ -100,18 +100,47 @@ function syncNoteToDB(filePath: string, content: string) {
 }
 
 function extractTags(content: string): string[] {
-  // Extract tags from frontmatter or from #tag syntax
   const tags: string[] = []
-  // Frontmatter tags
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  // 1. Frontmatter tags
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (fmMatch) {
     const fm = fmMatch[1]
-    const tagMatch = fm.match(/tags:\s*\[([^\]]*)\]/)
-    if (tagMatch) {
-      tags.push(...tagMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, '')))
+    // YAML-style: tags: [tag1, tag2]
+    const yamlMatch = fm.match(/tags:\s*\[([^\]]*)\]/)
+    if (yamlMatch) {
+      tags.push(...yamlMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, '')))
+    }
+    // YAML-style: tags:\n  - tag1\n  - tag2
+    const yamlListMatch = fm.match(/tags:\s*\n((?:\s*-\s*.+\n?)*)/)
+    if (yamlListMatch) {
+      const listItems = yamlListMatch[1].matchAll(/-\s*(.+)/g)
+      for (const item of listItems) {
+        tags.push(item[1].trim().replace(/['"]/g, ''))
+      }
     }
   }
+  // 2. Inline #tag syntax (not in code blocks or URLs)
+  const bodyContent = content.replace(/^---[\s\S]*?---/, '') // Remove frontmatter
+  const inlineTags = bodyContent.matchAll(/(?:^|\s)#([\w一-鿿-]+)/g)
+  for (const match of inlineTags) {
+    const tag = match[1].toLowerCase()
+    if (!tags.includes(tag)) tags.push(tag)
+  }
   return tags
+}
+
+// Get all unique tags across notes
+export function getAllTags(): string[] {
+  const allTags = new Set<string>()
+  try {
+    const { getAllNotes } = require('../db/queries')
+    const notes = getAllNotes()
+    for (const note of notes) {
+      const noteTags = JSON.parse(note.tags || '[]')
+      noteTags.forEach((t: string) => allTags.add(t))
+    }
+  } catch {}
+  return Array.from(allTags).sort()
 }
 
 function extractDiaryDate(filePath: string): string | null {
@@ -290,6 +319,35 @@ export function registerNotesIPC() {
         is_diary: row.is_diary === 1,
         diary_date: row.diary_date,
       }))
+    } catch {
+      return []
+    }
+  })
+
+  // Get all tags
+  ipcMain.handle('notes:tags', async () => {
+    return getAllTags()
+  })
+
+  // Get notes by tag
+  ipcMain.handle('notes:by-tag', async (_event, tag: string) => {
+    try {
+      const allNotes = getAllNotes()
+      return allNotes
+        .filter((row) => {
+          const tags = JSON.parse(row.tags || '[]')
+          return tags.includes(tag)
+        })
+        .map((row) => ({
+          id: row.id,
+          path: row.path,
+          title: row.title,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          tags: JSON.parse(row.tags || '[]'),
+          is_diary: row.is_diary === 1,
+          diary_date: row.diary_date,
+        }))
     } catch {
       return []
     }
