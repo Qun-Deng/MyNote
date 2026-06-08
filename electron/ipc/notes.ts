@@ -78,6 +78,7 @@ function scanDirectory(dir: string, relativeTo: string): { name: string; path: s
     if (item.startsWith('.')) continue
     const fullPath = path.join(dir, item)
     const relPath = path.relative(relativeTo, fullPath).replace(/\\/g, '/')
+    if (isHiddenVaultDir(relPath)) continue
     const stat = fs.statSync(fullPath)
 
     if (stat.isDirectory()) {
@@ -105,6 +106,10 @@ function scanDirectory(dir: string, relativeTo: string): { name: string; path: s
   return entries
 }
 
+function isHiddenVaultDir(relPath: string) {
+  return relPath === 'assets' || relPath.startsWith('assets/')
+}
+
 function syncNoteToDB(filePath: string, content: string) {
   try {
     const stat = fs.statSync(resolveNotePath(filePath))
@@ -128,8 +133,69 @@ function syncNoteToDB(filePath: string, content: string) {
       const resolved = resolveWikilinkTargets(rawLinks)
       updateLinksForNote(filePath, resolved)
     } catch {}
-  } catch {
-    // DB might not be initialized yet, that's OK
+  } catch (err) {
+    console.error('[syncNoteToDB] Failed to sync note to DB:', filePath, err)
+  }
+}
+
+function syncVaultNotesToDB() {
+  if (!vaultPath) return
+  const existingPaths = new Set<string>()
+  const walkDir = (dir: string) => {
+    if (!vaultPath || !fs.existsSync(dir)) return
+    for (const item of fs.readdirSync(dir)) {
+      if (item.startsWith('.')) continue
+      const fullPath = path.join(dir, item)
+      const relPath = path.relative(vaultPath, fullPath).replace(/\\/g, '/')
+      if (isHiddenVaultDir(relPath)) continue
+      const stat = fs.statSync(fullPath)
+      if (stat.isDirectory()) {
+        walkDir(fullPath)
+      } else if (stat.isFile() && item.endsWith('.md')) {
+        try {
+          syncNoteToDB(relPath, fs.readFileSync(fullPath, 'utf-8'))
+          existingPaths.add(relPath)
+        } catch {}
+      }
+    }
+  }
+  walkDir(vaultPath)
+
+  try {
+    for (const note of getAllNotes()) {
+      if (isHiddenVaultDir(note.path)) continue
+      if (!existingPaths.has(note.path)) {
+        deleteNoteByPath(note.path)
+      }
+    }
+  } catch {}
+}
+
+function normalizeTagName(tag: string): string {
+  return tag
+    .trim()
+    .replace(/^\\+|\\+$/g, '')
+    .replace(/^#/, '')
+    .replace(/^[\[]+|[\]]+$/g, '')
+    .replace(/^\\+|\\+$/g, '')
+    .replace(/[.,;:!?，。；：！？、）)]+$/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+function addTag(tags: string[], rawTag: string) {
+  const tag = normalizeTagName(rawTag)
+  if (tag && !tags.includes(tag)) tags.push(tag)
+}
+
+function addTagsFromValue(tags: string[], value: string) {
+  const cleaned = value
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .replace(/['"]/g, '')
+    .trim()
+  for (const part of cleaned.split(/[,，、\s]+/)) {
+    addTag(tags, part)
   }
 }
 
@@ -139,41 +205,87 @@ function extractTags(content: string): string[] {
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (fmMatch) {
     const fm = fmMatch[1]
-    // YAML-style: tags: [tag1, tag2]
-    const yamlMatch = fm.match(/tags:\s*\[([^\]]*)\]/)
-    if (yamlMatch) {
-      tags.push(...yamlMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, '')))
+    // YAML-style: tags: [tag1, tag2] or tags: tag1, tag2
+    const yamlMatch = fm.match(/^tags:\s*(.+)$/im)
+    if (yamlMatch && !yamlMatch[1].trim().startsWith('\n')) {
+      addTagsFromValue(tags, yamlMatch[1])
     }
     // YAML-style: tags:\n  - tag1\n  - tag2
     const yamlListMatch = fm.match(/tags:\s*\n((?:\s*-\s*.+\n?)*)/)
     if (yamlListMatch) {
       const listItems = yamlListMatch[1].matchAll(/-\s*(.+)/g)
       for (const item of listItems) {
-        tags.push(item[1].trim().replace(/['"]/g, ''))
+        addTag(tags, item[1].replace(/['"]/g, ''))
       }
     }
   }
-  // 2. Inline #tag syntax (not in code blocks or URLs)
-  const bodyContent = content.replace(/^---[\s\S]*?---/, '') // Remove frontmatter
-  const inlineTags = bodyContent.matchAll(/(?:^|\s)#([\w一-鿿-]+)/g)
+  // 2. Inline #tag syntax. Milkdown may escape brackets around text,
+  // so bracketed forms are tolerated only for older saved content.
+  const bodyContent = content
+    .replace(/^---[\s\S]*?---/, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '')
+
+  const bracketTags = bodyContent.matchAll(/\\?\[#([^\]\\\s#]+)\\?\]/g)
+  for (const match of bracketTags) addTag(tags, match[1])
+
+  const declarationLines = bodyContent.matchAll(/^\s*(?:tags|标签)\s*[:：]\s*(.+)$/gim)
+  for (const match of declarationLines) addTagsFromValue(tags, match[1])
+
+  const inlineTags = bodyContent.matchAll(/(^|[\s([{])\\?#([^\s#\\\]]+)/g)
   for (const match of inlineTags) {
-    const tag = match[1].toLowerCase()
-    if (!tags.includes(tag)) tags.push(tag)
+    addTag(tags, match[2])
   }
   return tags
 }
 
-// Get all unique tags across notes
+// Get all unique tags across non-diary notes
 export function getAllTags(): string[] {
   const allTags = new Set<string>()
+
+  // Try DB first
   try {
-    const { getAllNotes } = require('../db/queries')
     const notes = getAllNotes()
-    for (const note of notes) {
-      const noteTags = JSON.parse(note.tags || '[]')
-      noteTags.forEach((t: string) => allTags.add(t))
+    if (notes.length > 0) {
+      for (const note of notes) {
+        if (note.is_diary === 1 || isHiddenVaultDir(note.path)) continue
+        try {
+          const noteTags = JSON.parse(note.tags || '[]')
+          noteTags.forEach((t: string) => allTags.add(t))
+        } catch {}
+      }
+      if (allTags.size > 0) return Array.from(allTags).sort()
     }
   } catch {}
+
+  // Fallback: scan filesystem directly
+  if (vaultPath) {
+    try {
+      const walkDir = (dir: string) => {
+        if (!fs.existsSync(dir)) return
+        const items = fs.readdirSync(dir)
+        for (const item of items) {
+          if (item.startsWith('.')) continue
+          const fullPath = path.join(dir, item)
+          const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
+          if (isHiddenVaultDir(relPath)) continue
+          const stat = fs.statSync(fullPath)
+          if (stat.isDirectory()) {
+            if (item === 'diary') continue  // Skip diary folder
+            walkDir(fullPath)
+          } else if (item.endsWith('.md')) {
+            try {
+              const content = fs.readFileSync(fullPath, 'utf-8')
+              const tags = extractTags(content)
+              tags.forEach((t: string) => allTags.add(t))
+            } catch {}
+          }
+        }
+      }
+      walkDir(vaultPath)
+    } catch {}
+  }
+
   return Array.from(allTags).sort()
 }
 
@@ -258,9 +370,13 @@ function replaceInlineTag(content: string, oldTag: string, newTag: string): stri
   const fmEnd = content.indexOf(body)
   const prefix = content.slice(0, fmEnd)
 
-  const newBody = body.replace(
-    new RegExp(`(?<=^|\\s)#${escapeRegex(oldTag)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
-    `#${newTag}`
+  let newBody = body.replace(
+    new RegExp(`\\\\?\\[#${escapeRegex(oldTag)}\\\\?\\]`, 'g'),
+    `\\[#${newTag}\\]`
+  )
+  newBody = newBody.replace(
+    new RegExp(`(^|\\s)#${escapeRegex(oldTag)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
+    `$1#${newTag}`
   )
 
   return prefix + newBody
@@ -271,9 +387,13 @@ function removeInlineTag(content: string, tagName: string): string {
   const fmEnd = content.indexOf(body)
   const prefix = content.slice(0, fmEnd)
 
-  const newBody = body.replace(
-    new RegExp(`(?<=^|\\s)#${escapeRegex(tagName)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
+  let newBody = body.replace(
+    new RegExp(`\\\\?\\[#${escapeRegex(tagName)}\\\\?\\]`, 'g'),
     ''
+  )
+  newBody = newBody.replace(
+    new RegExp(`(^|\\s)#${escapeRegex(tagName)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
+    '$1'
   )
 
   return prefix + newBody
@@ -343,23 +463,26 @@ export function registerNotesIPC() {
   // List all notes
   ipcMain.handle('notes:list', async () => {
     if (!vaultPath) return []
+    syncVaultNotesToDB()
 
     // Try DB first, fall back to file scan
     try {
       const dbNotes = getAllNotes()
       if (dbNotes.length > 0) {
-        return dbNotes.map((row) => ({
-          id: row.id,
-          path: row.path,
-          title: row.title,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          tags: JSON.parse(row.tags || '[]'),
-          is_diary: row.is_diary === 1,
-          diary_date: row.diary_date,
-          archived: row.archived === 1,
-          pinned: row.pinned === 1,
-        }))
+        return dbNotes
+          .filter((row) => !isHiddenVaultDir(row.path))
+          .map((row) => ({
+            id: row.id,
+            path: row.path,
+            title: row.title,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            tags: JSON.parse(row.tags || '[]'),
+            is_diary: row.is_diary === 1,
+            diary_date: row.diary_date,
+            archived: row.archived === 1,
+            pinned: row.pinned === 1,
+          }))
       }
     } catch {}
 
@@ -371,10 +494,11 @@ export function registerNotesIPC() {
       for (const item of items) {
         if (item.startsWith('.')) continue
         const fullPath = path.join(dir, item)
+        const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
+        if (isHiddenVaultDir(relPath)) continue
         if (fs.statSync(fullPath).isDirectory()) {
           walkDir(fullPath)
         } else if (item.endsWith('.md')) {
-          const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
           const stat = fs.statSync(fullPath)
           const content = fs.readFileSync(fullPath, 'utf-8')
           notes.push({
@@ -400,7 +524,12 @@ export function registerNotesIPC() {
   ipcMain.handle('notes:read', async (_event, filePath: string) => {
     if (!vaultPath) return null
     const fullPath = resolveNotePath(filePath)
-    if (!fs.existsSync(fullPath)) return null
+    if (!fs.existsSync(fullPath)) {
+      try {
+        deleteNoteByPath(filePath)
+      } catch {}
+      return null
+    }
 
     const content = fs.readFileSync(fullPath, 'utf-8')
     const stat = fs.statSync(fullPath)
@@ -440,6 +569,8 @@ export function registerNotesIPC() {
     fs.writeFileSync(fullPath, content, 'utf-8')
 
     // Sync to DB
+    const tags = extractTags(content)
+    console.log('[notes:write] Syncing note:', filePath, 'tags:', tags)
     syncNoteToDB(filePath, content)
   })
 
@@ -521,18 +652,20 @@ export function registerNotesIPC() {
     try {
       const rows = getRecentNotes(6)
       if (rows.length > 0) {
-        return rows.map((row) => ({
-          id: row.id,
-          path: row.path,
-          title: row.title,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          tags: JSON.parse(row.tags || '[]'),
-          is_diary: row.is_diary === 1,
-          diary_date: row.diary_date,
-          archived: row.archived === 1,
-          pinned: row.pinned === 1,
-        }))
+        return rows
+          .filter((row) => !isHiddenVaultDir(row.path))
+          .map((row) => ({
+            id: row.id,
+            path: row.path,
+            title: row.title,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            tags: JSON.parse(row.tags || '[]'),
+            is_diary: row.is_diary === 1,
+            diary_date: row.diary_date,
+            archived: row.archived === 1,
+            pinned: row.pinned === 1,
+          }))
       }
     } catch {}
 
@@ -545,10 +678,11 @@ export function registerNotesIPC() {
       for (const item of items) {
         if (item.startsWith('.')) continue
         const fullPath = path.join(dir, item)
+        const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
+        if (isHiddenVaultDir(relPath)) continue
         if (fs.statSync(fullPath).isDirectory()) {
           walkDir(fullPath)
         } else if (item.endsWith('.md')) {
-          const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
           // Skip diary notes for recent list
           if (relPath.startsWith('diary/')) return
           const stat = fs.statSync(fullPath)
@@ -575,15 +709,56 @@ export function registerNotesIPC() {
 
   // Get all tags
   ipcMain.handle('notes:tags', async () => {
-    return getAllTags()
+    syncVaultNotesToDB()
+
+    // Collect tags from ALL notes (DB + filesystem fallback), excluding diary
+    const allNotes = await (async () => {
+      if (!vaultPath) return []
+      try {
+        const dbNotes = getAllNotes()
+        if (dbNotes.length > 0) {
+          return dbNotes
+            .filter(row => row.is_diary !== 1 && !isHiddenVaultDir(row.path))
+            .map(row => ({ tags: JSON.parse(row.tags || '[]') as string[] }))
+        }
+      } catch {}
+      // Filesystem fallback
+      const result: { tags: string[] }[] = []
+      const walkDir = (dir: string) => {
+        if (!fs.existsSync(dir)) return
+        for (const item of fs.readdirSync(dir)) {
+          const fullPath = path.join(dir, item)
+          const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
+          if (item.startsWith('.') || item === 'diary' || isHiddenVaultDir(relPath)) continue
+          if (fs.statSync(fullPath).isDirectory()) { walkDir(fullPath) }
+          else if (item.endsWith('.md')) {
+            try {
+              result.push({ tags: extractTags(fs.readFileSync(fullPath, 'utf-8')) })
+            } catch {}
+          }
+        }
+      }
+      walkDir(vaultPath)
+      return result
+    })()
+
+    const tagSet = new Set<string>()
+    for (const note of allNotes) {
+      for (const t of note.tags) tagSet.add(t)
+    }
+    const tags = Array.from(tagSet).sort()
+    console.log('[notes:tags] Returning', tags.length, 'tags:', tags.slice(0, 10))
+    return tags
   })
 
   // Get notes by tag
   ipcMain.handle('notes:by-tag', async (_event, tag: string) => {
+    syncVaultNotesToDB()
     try {
       const allNotes = getAllNotes()
       return allNotes
         .filter((row) => {
+          if (isHiddenVaultDir(row.path)) return false
           const tags = JSON.parse(row.tags || '[]')
           return tags.includes(tag)
         })

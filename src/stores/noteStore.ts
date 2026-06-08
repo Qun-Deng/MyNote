@@ -12,7 +12,7 @@ interface NoteState {
   dirty: boolean
 
   /** Open a note by path */
-  openNote: (filePath: string) => Promise<void>
+  openNote: (filePath: string) => Promise<boolean>
   /** Set content (from editor) */
   setContent: (content: string) => void
   /** Patch currently open note metadata */
@@ -40,12 +40,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           loading: false,
           dirty: false,
         })
+        return true
       } else {
-        set({ loading: false })
+        set({ currentMeta: null, currentContent: '', loading: false, dirty: false })
+        return false
       }
     } catch (err) {
       console.error('Failed to open note:', err)
       set({ loading: false })
+      return false
     }
   },
 

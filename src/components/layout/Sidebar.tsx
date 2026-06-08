@@ -258,8 +258,12 @@ export default function Sidebar() {
   }, [vaultPath])
 
   const handleOpenNote = async (filePath: string) => {
-    await openNote(filePath)
-    setOpenNotePath(filePath)
+    const opened = await openNote(filePath)
+    if (opened) {
+      setOpenNotePath(filePath)
+    } else {
+      await refreshTree()
+    }
   }
 
   const handleNewNote = (folderPath: string) => {

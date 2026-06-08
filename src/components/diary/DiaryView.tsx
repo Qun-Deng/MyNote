@@ -202,7 +202,10 @@ export default function DiaryView() {
   }
 
   const handleEditDiary = async () => {
-    if (diaryPath) { await openNote(diaryPath); setOpenNotePath(diaryPath) }
+    if (diaryPath) {
+      const opened = await openNote(diaryPath)
+      if (opened) setOpenNotePath(diaryPath)
+    }
   }
 
   // Click date → auto-create + open editor
@@ -223,7 +226,10 @@ export default function DiaryView() {
         diary = await window.mynote.diary.create(ds)
         refreshTree()
       }
-      if (diary) { await openNote(diary.path); setOpenNotePath(diary.path) }
+      if (diary) {
+        const opened = await openNote(diary.path)
+        if (opened) setOpenNotePath(diary.path)
+      }
     } catch {}
   }
 

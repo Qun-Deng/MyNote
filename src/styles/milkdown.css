@@ -862,3 +862,39 @@
   color: #6d28d9;
   text-decoration-color: #8b5cf6;
 }
+
+/* ====== Math (KaTeX) ====== */
+
+.md-math-source {
+  display: none;
+}
+
+.md-math-source-active {
+  display: inline;
+  width: auto;
+  max-width: none;
+  overflow: visible;
+  opacity: 1;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  pointer-events: auto;
+  user-select: text;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  background: rgba(124, 58, 237, 0.08);
+  border-radius: 3px;
+}
+
+.katex-inline {
+  display: inline-block;
+  font-size: 1.1em;
+  vertical-align: -0.08em;
+  cursor: text;
+}
+
+.katex-block {
+  display: block;
+  text-align: center;
+  margin: 0.75em 0;
+  cursor: text;
+}

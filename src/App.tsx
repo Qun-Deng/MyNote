@@ -52,6 +52,63 @@ function replaceMarkdownTitle(content: string, title: string) {
   return `${frontmatter}${frontmatter && !nextBody.startsWith('\n') ? '\n' : ''}${nextBody}`
 }
 
+function normalizeTagName(tag: string) {
+  return tag
+    .trim()
+    .replace(/^\\+|\\+$/g, '')
+    .replace(/^#/, '')
+    .replace(/^[\[]+|[\]]+$/g, '')
+    .replace(/^\\+|\\+$/g, '')
+    .replace(/[.,;:!?，。；：！？、）)]+$/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+function addMarkdownTag(tags: string[], rawTag: string) {
+  const tag = normalizeTagName(rawTag)
+  if (tag && !tags.includes(tag)) tags.push(tag)
+}
+
+function addMarkdownTagsFromValue(tags: string[], value: string) {
+  const cleaned = value
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .replace(/['"]/g, '')
+    .trim()
+  for (const part of cleaned.split(/[,，、\s]+/)) {
+    addMarkdownTag(tags, part)
+  }
+}
+
+function extractMarkdownTags(content: string) {
+  const tags: string[] = []
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (frontmatter) {
+    const yamlMatch = frontmatter[1].match(/^tags:\s*(.+)$/im)
+    if (yamlMatch) addMarkdownTagsFromValue(tags, yamlMatch[1])
+
+    const yamlListMatch = frontmatter[1].match(/tags:\s*\n((?:\s*-\s*.+\n?)*)/)
+    if (yamlListMatch) {
+      const listItems = yamlListMatch[1].matchAll(/-\s*(.+)/g)
+      for (const item of listItems) addMarkdownTag(tags, item[1].replace(/['"]/g, ''))
+    }
+  }
+
+  const body = content
+    .replace(/^---[\s\S]*?---/, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '')
+
+  const declarationLines = body.matchAll(/^\s*(?:tags|标签)\s*[:：]\s*(.+)$/gim)
+  for (const match of declarationLines) addMarkdownTagsFromValue(tags, match[1])
+
+  const matches = body.matchAll(/(^|[\s([{])\\?#([^\s#\\\]]+)/g)
+  for (const match of matches) {
+    addMarkdownTag(tags, match[2])
+  }
+  return tags
+}
+
 function App() {
   const activeView = useUIStore((s) => s.activeView)
   const openNotePath = useUIStore((s) => s.openNotePath)
@@ -59,6 +116,7 @@ function App() {
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const setKnowledgeTag = useUIStore((s) => s.setKnowledgeTag)
 
   const currentMeta = useNoteStore((s) => s.currentMeta)
   const currentContent = useNoteStore((s) => s.currentContent)
@@ -161,6 +219,7 @@ function App() {
     async (filePath: string, content: string) => {
       let savedPath = filePath
       await window.mynote.notes.write(filePath, content)
+      const tags = extractMarkdownTags(content)
       const title = extractMarkdownTitle(content)
       if (title && currentMeta && !currentMeta.is_diary) {
         const newPath = renamePathByTitle(filePath, title)
@@ -169,7 +228,7 @@ function App() {
             const normalizedPath = await window.mynote.notes.rename(filePath, newPath)
             savedPath = normalizedPath
             setOpenNotePath(normalizedPath)
-            updateCurrentMeta({ path: normalizedPath, title })
+            updateCurrentMeta({ path: normalizedPath, title, tags })
             // Update tab path reference
             closeTab(filePath)
             openTab(normalizedPath, title)
@@ -177,9 +236,11 @@ function App() {
           } catch (err) {
             console.error('Failed to rename note from title:', err)
           }
-        } else if (title !== currentMeta.title) {
-          updateCurrentMeta({ title })
+        } else if (title !== currentMeta.title || tags.join('\0') !== currentMeta.tags.join('\0')) {
+          updateCurrentMeta({ title, tags })
         }
+      } else if (currentMeta && tags.join('\0') !== currentMeta.tags.join('\0')) {
+        updateCurrentMeta({ tags })
       }
       try {
         await window.mynote.todos.extract(savedPath, content)
@@ -221,12 +282,48 @@ function App() {
     // Switch to the new active tab (closeTab auto-selects adjacent)
     const newActive = useTabStore.getState().activeTabPath
     if (newActive && newActive !== path) {
-      await openNote(newActive)
-      setOpenNotePath(newActive)
+      const opened = await openNote(newActive)
+      if (opened) {
+        setOpenNotePath(newActive)
+      } else {
+        closeTab(newActive)
+        setOpenNotePath(null)
+      }
     } else if (useTabStore.getState().tabs.length === 0) {
       setOpenNotePath(null)
     }
   }
+
+  useEffect(() => {
+    const cleanup = window.mynote.vault.onChanged(async () => {
+      await refreshTree()
+      let validPaths: Set<string> | null = null
+      try {
+        const allNotes = await window.mynote.notes.list()
+        validPaths = new Set(allNotes.map((note: { path: string }) => note.path))
+      } catch {
+        return
+      }
+      if (!validPaths) return
+
+      const tabState = useTabStore.getState()
+      for (const tab of tabState.tabs) {
+        if (!validPaths.has(tab.path)) closeTab(tab.path)
+      }
+
+      if (currentMeta && !validPaths.has(currentMeta.path)) {
+        closeNote()
+        const nextActive = useTabStore.getState().activeTabPath
+        if (nextActive && validPaths.has(nextActive)) {
+          const opened = await openNote(nextActive)
+          setOpenNotePath(opened ? nextActive : null)
+        } else {
+          setOpenNotePath(null)
+        }
+      }
+    })
+    return cleanup
+  }, [closeNote, closeTab, currentMeta?.path, openNote, refreshTree, setOpenNotePath])
 
   // If a note is open, show the editor
   const isEditing = !!(openNotePath && currentMeta)
@@ -321,8 +418,13 @@ function App() {
                               cacheContent(currentMeta.path, currentContent, useNoteStore.getState().dirty)
                             }
                             // Load the tab's content
-                            await openNote(tab.path)
-                            setOpenNotePath(tab.path)
+                            const opened = await openNote(tab.path)
+                            if (opened) {
+                              setOpenNotePath(tab.path)
+                            } else {
+                              closeTab(tab.path)
+                              await refreshTree()
+                            }
                           }
                         }}
                         className={`tab-item ${isActive ? 'active' : ''}`}
@@ -423,19 +525,24 @@ function App() {
                         const target = exact || byName
                         if (target) {
                           await saveNote()
-                          await openNote(target.path)
-                          setOpenNotePath(target.path)
+                          const opened = await openNote(target.path)
+                          if (opened) setOpenNotePath(target.path)
                         } else {
                           const newNote = await window.mynote.notes.create('notes', pageName)
                           if (newNote) {
                             await saveNote()
-                            await openNote(newNote.path)
-                            setOpenNotePath(newNote.path)
+                            const opened = await openNote(newNote.path)
+                            if (opened) setOpenNotePath(newNote.path)
                           }
                         }
                       } catch (err) {
                         console.error('Failed to navigate wikilink:', err)
                       }
+                    }}
+                    onTagClick={async (tag: string) => {
+                      await saveNote()
+                      setKnowledgeTag(tag)
+                      setActiveView('knowledge')
                     }}
                   />
                 </div>
