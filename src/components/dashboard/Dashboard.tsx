@@ -163,7 +163,7 @@ export default function Dashboard() {
                       {note.tags.length > 0 && (
                         <div className="flex gap-1 mt-2">
                           {note.tags.map((tag) => (
-                            <span key={tag} className="text-[10px] bg-surface-100 text-surface-500 px-1.5 py-0.5 rounded">
+                            <span key={tag} className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
                               {tag}
                             </span>
                           ))}

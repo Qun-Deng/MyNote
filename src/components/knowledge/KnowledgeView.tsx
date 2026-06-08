@@ -137,25 +137,17 @@ export default function KnowledgeView() {
             )}
           </div>
           {allTags.length === 0 ? (
-            <div className="text-xs text-surface-400 space-y-1.5">
-              <p>在笔记中使用以下方式添加标签：</p>
-              <p>
-                📝 正文中: <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">#标签名</code>
-              </p>
-              <p>
-                📄 Frontmatter: <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">tags: [标签1, 标签2]</code>
-              </p>
-            </div>
+            <p className="text-xs text-surface-400">暂无标签</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {allTags.map((tag) => (
                 <span
                   key={tag}
                   onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-                  className={`text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                  className={`text-xs px-2.5 py-1 rounded-md cursor-pointer transition-all font-medium border ${
                     activeTag === tag
-                      ? 'bg-accent-100 text-accent-700 font-medium ring-1 ring-accent-300'
-                      : 'bg-surface-100 text-surface-600 hover:bg-accent-50 hover:text-accent-600'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300 ring-1 ring-emerald-400'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 hover:border-emerald-300'
                   }`}
                 >
                   #{tag}
