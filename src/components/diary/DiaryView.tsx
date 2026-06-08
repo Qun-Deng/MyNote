@@ -325,12 +325,17 @@ export default function DiaryView() {
               {hours.map((hour) => {
                 const y = ((hour - START_HOUR) / (END_HOUR - START_HOUR)) * TOTAL_HEIGHT
                 return (
-                  <div key={hour} className="absolute left-0 right-0 flex items-center"
-                    style={{ top: y }}>
-                    <span className="w-14 text-right text-[11px] text-surface-400 pr-3 select-none flex-shrink-0">
+                  <div key={hour}>
+                    <span
+                      className="absolute left-0 w-14 -translate-y-1/2 text-right text-[11px] text-surface-400 pr-3 select-none"
+                      style={{ top: y }}
+                    >
                       {String(hour).padStart(2, '0')}:00
                     </span>
-                    <div className="flex-1 h-px bg-surface-200" />
+                    <div
+                      className="absolute left-14 right-0 h-px bg-surface-200"
+                      style={{ top: y }}
+                    />
                   </div>
                 )
               })}
