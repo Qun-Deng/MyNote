@@ -13,12 +13,15 @@ import {
   Trash2,
   Sun,
   Moon,
+  FilePlus,
+  FolderPlus,
+  Pencil,
 } from 'lucide-react'
 import { useUIStore, type ActiveView } from '../../stores/uiStore'
 import { useVaultStore } from '../../stores/vaultStore'
 import { useNoteStore } from '../../stores/noteStore'
 import { useThemeStore } from '../../stores/themeStore'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import type { FileTreeNode } from '../../../shared/types'
 
 const navItems: { id: ActiveView; label: string; icon: React.ReactNode }[] = [
@@ -46,10 +49,73 @@ export default function Sidebar() {
 
   const openNote = useNoteStore((s) => s.openNote)
 
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const plusRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close [+] dropdown on outside click
   useEffect(() => {
-    if (vaultPath) {
-      refreshTree()
+    const handler = (e: MouseEvent) => {
+      if (
+        plusMenuOpen &&
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        plusRef.current &&
+        !plusRef.current.contains(e.target as Node)
+      ) {
+        setPlusMenuOpen(false)
+      }
     }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [plusMenuOpen])
+
+  // Listen for context menu actions from main process
+  useEffect(() => {
+    const cleanup = window.mynote.vault.onContextMenuAction(async (action, targetPath) => {
+      switch (action) {
+        case 'new-note': {
+          const name = prompt('笔记名称（不含扩展名）:')
+          if (name) {
+            await window.mynote.notes.create(targetPath, name)
+            refreshTree()
+          }
+          break
+        }
+        case 'new-folder': {
+          const name = prompt('文件夹名称:')
+          if (name) {
+            const folderPath = targetPath ? `${targetPath}/${name}` : name
+            await window.mynote.vault.createFolder(folderPath)
+            refreshTree()
+          }
+          break
+        }
+        case 'rename': {
+          const newName = prompt('新名称:', targetPath.split('/').pop())
+          if (newName) {
+            const parts = targetPath.split('/')
+            parts[parts.length - 1] = newName
+            const newPath = parts.join('/')
+            await window.mynote.notes.rename(targetPath, newPath)
+            refreshTree()
+          }
+          break
+        }
+        case 'delete': {
+          if (confirm(`确定删除 "${targetPath}" 吗？此操作不可撤销。`)) {
+            await window.mynote.vault.deleteItem(targetPath)
+            refreshTree()
+          }
+          break
+        }
+      }
+    })
+    return cleanup
+  }, [refreshTree])
+
+  useEffect(() => {
+    if (vaultPath) refreshTree()
   }, [vaultPath])
 
   const handleOpenNote = async (filePath: string) => {
@@ -57,17 +123,24 @@ export default function Sidebar() {
     setOpenNotePath(filePath)
   }
 
-  const handleCreateNote = () => {
+  const handleNewNote = (folderPath: string) => {
     const name = prompt('笔记名称（不含扩展名）:')
+    if (name) createNote(folderPath || 'notes', name)
+  }
+
+  const handleNewFolder = async (parentPath: string) => {
+    const name = prompt('文件夹名称:')
     if (name) {
-      createNote('notes', name)
+      const folderPath = parentPath ? `${parentPath}/${name}` : name
+      await window.mynote.vault.createFolder(folderPath)
+      refreshTree()
     }
   }
 
-  const handleDeleteNote = (filePath: string) => {
-    if (confirm(`确定删除 "${filePath}" 吗？`)) {
-      deleteNote(filePath)
-    }
+  const handleContextMenu = (e: React.MouseEvent, nodePath: string, nodeType: 'file' | 'directory') => {
+    e.preventDefault()
+    e.stopPropagation()
+    window.mynote.vault.showContextMenu(nodePath, nodeType)
   }
 
   return (
@@ -111,23 +184,69 @@ export default function Sidebar() {
             <FolderOpen className="w-3.5 h-3.5" />
             文件夹
           </div>
-          <button
-            onClick={handleCreateNote}
-            className="p-0.5 hover:bg-surface-100 rounded transition-colors"
-            title="新建笔记"
-          >
-            <Plus className="w-3.5 h-3.5 text-surface-400" />
-          </button>
+
+          {/* [+] Dropdown */}
+          <div className="relative">
+            <button
+              ref={plusRef}
+              onClick={() => setPlusMenuOpen(!plusMenuOpen)}
+              className="p-0.5 hover:bg-surface-100 rounded transition-colors"
+              title="新建"
+            >
+              <Plus className="w-3.5 h-3.5 text-surface-400" />
+            </button>
+
+            {plusMenuOpen && (
+              <div
+                ref={menuRef}
+                className="absolute right-0 top-full mt-1 w-36 bg-white border border-surface-200
+                           rounded-md shadow-lg py-1 z-50"
+              >
+                <button
+                  onClick={() => { setPlusMenuOpen(false); handleNewNote('notes') }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700
+                             hover:bg-surface-50 transition-colors"
+                >
+                  <FilePlus className="w-3.5 h-3.5 text-surface-400" />
+                  新建笔记
+                </button>
+                <button
+                  onClick={() => { setPlusMenuOpen(false); handleNewFolder('') }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700
+                             hover:bg-surface-50 transition-colors"
+                >
+                  <FolderPlus className="w-3.5 h-3.5 text-surface-400" />
+                  新建文件夹
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {tree.length === 0 ? (
-          <div className="text-xs text-surface-400 px-2 py-2">暂无笔记</div>
+          <div className="text-xs text-surface-400 px-2 py-2">
+            暂无笔记
+            <div className="mt-2 space-y-1">
+              <button
+                onClick={() => handleNewNote('notes')}
+                className="block text-accent-600 hover:text-accent-700"
+              >
+                + 新建笔记
+              </button>
+              <button
+                onClick={() => handleNewFolder('')}
+                className="block text-accent-600 hover:text-accent-700"
+              >
+                + 新建文件夹
+              </button>
+            </div>
+          </div>
         ) : (
           <FileTreeView
             nodes={tree}
             depth={0}
             onOpen={handleOpenNote}
-            onDelete={handleDeleteNote}
+            onContextMenu={handleContextMenu}
           />
         )}
       </div>
@@ -160,12 +279,12 @@ function FileTreeView({
   nodes,
   depth,
   onOpen,
-  onDelete,
+  onContextMenu,
 }: {
   nodes: FileTreeNode[]
   depth: number
   onOpen: (path: string) => void
-  onDelete: (path: string) => void
+  onContextMenu: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void
 }) {
   return (
     <>
@@ -175,7 +294,7 @@ function FileTreeView({
           node={node}
           depth={depth}
           onOpen={onOpen}
-          onDelete={onDelete}
+          onContextMenu={onContextMenu}
         />
       ))}
     </>
@@ -186,12 +305,12 @@ function FileTreeItem({
   node,
   depth,
   onOpen,
-  onDelete,
+  onContextMenu,
 }: {
   node: FileTreeNode
   depth: number
   onOpen: (path: string) => void
-  onDelete: (path: string) => void
+  onContextMenu: (e: React.MouseEvent, path: string, type: 'file' | 'directory') => void
 }) {
   const [expanded, setExpanded] = useState(depth < 1)
 
@@ -200,6 +319,7 @@ function FileTreeItem({
       <div>
         <button
           onClick={() => setExpanded(!expanded)}
+          onContextMenu={(e) => onContextMenu(e, node.path, 'directory')}
           className="w-full flex items-center gap-1 px-2 py-1 text-xs text-surface-500
                      hover:bg-surface-100 rounded transition-colors"
           style={{ paddingLeft: `${8 + depth * 12}px` }}
@@ -217,7 +337,7 @@ function FileTreeItem({
             nodes={node.children}
             depth={depth + 1}
             onOpen={onOpen}
-            onDelete={onDelete}
+            onContextMenu={onContextMenu}
           />
         )}
       </div>
@@ -230,13 +350,18 @@ function FileTreeItem({
                  hover:bg-surface-100 rounded transition-colors cursor-pointer"
       style={{ paddingLeft: `${8 + depth * 12}px` }}
       onClick={() => onOpen(node.path)}
+      onContextMenu={(e) => onContextMenu(e, node.path, 'file')}
     >
       <FileText className="w-3 h-3 flex-shrink-0 text-surface-400" />
       <span className="truncate flex-1">{node.name.replace('.md', '')}</span>
       <button
         onClick={(e) => {
           e.stopPropagation()
-          onDelete(node.path)
+          if (confirm(`确定删除 "${node.name}" 吗？`)) {
+            window.mynote.vault.deleteItem(node.path).then(() => {
+              window.location.reload()
+            })
+          }
         }}
         className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-all"
         title="删除"
