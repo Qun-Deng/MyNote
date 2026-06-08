@@ -9,6 +9,8 @@ import { useUIStore } from '../../stores/uiStore'
 
 export default function KnowledgeView() {
   const [notes, setNotes] = useState<NoteMeta[]>([])
+  const [allTags, setAllTags] = useState<string[]>([])
+  const [activeTag, setActiveTag] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -17,15 +19,19 @@ export default function KnowledgeView() {
   const openNote = useNoteStore((s) => s.openNote)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
 
-  // Load all notes
+  // Load all notes and tags
   useEffect(() => {
-    const loadNotes = async () => {
+    const loadData = async () => {
       try {
-        const allNotes = await window.mynote.notes.list()
+        const [allNotes, tags] = await Promise.all([
+          window.mynote.notes.list(),
+          window.mynote.notes.tags(),
+        ])
         setNotes(allNotes.filter((n: NoteMeta) => !n.is_diary))
+        setAllTags(tags)
       } catch {}
     }
-    loadNotes()
+    loadData()
   }, [])
 
   // Search
@@ -62,10 +68,14 @@ export default function KnowledgeView() {
     }
   }
 
-  // Filter notes by selected folder
-  const filteredNotes = selectedFolder
-    ? notes.filter((n) => n.path.startsWith(selectedFolder + '/'))
-    : notes
+  // Filter notes by folder, tag, and search
+  let filteredNotes = notes
+  if (selectedFolder) {
+    filteredNotes = filteredNotes.filter((n) => n.path.startsWith(selectedFolder + '/'))
+  }
+  if (activeTag) {
+    filteredNotes = filteredNotes.filter((n) => n.tags.includes(activeTag))
+  }
 
   // Show search results or folder view
   const showSearch = searchQuery.trim().length > 0
@@ -117,24 +127,36 @@ export default function KnowledgeView() {
           <div className="flex items-center gap-2 mb-3">
             <Tag className="w-4 h-4 text-surface-500" />
             <h2 className="text-sm font-semibold text-surface-700">标签</h2>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {Array.from(new Set(notes.flatMap((n) => n.tags)))
-              .filter(Boolean)
-              .slice(0, 15)
-              .map((tag) => (
-                <span
-                  key={tag}
-                  className="text-xs bg-surface-100 text-surface-600 px-2 py-0.5 rounded cursor-pointer hover:bg-accent-50 hover:text-accent-600 transition-colors"
-                  onClick={() => setSearchQuery(`#${tag}`)}
-                >
-                  {tag}
-                </span>
-              ))}
-            {notes.flatMap((n) => n.tags).length === 0 && (
-              <p className="text-xs text-surface-400">暂无标签</p>
+            {activeTag && (
+              <button
+                onClick={() => setActiveTag(null)}
+                className="text-[10px] text-accent-600 hover:text-accent-700 bg-accent-50 px-1.5 py-0.5 rounded"
+              >
+                清除
+              </button>
             )}
           </div>
+          {allTags.length === 0 ? (
+            <p className="text-xs text-surface-400">
+              在笔记中使用 <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">#标签</code> 或 frontmatter <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">tags: [...]</code>
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {allTags.map((tag) => (
+                <span
+                  key={tag}
+                  onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                  className={`text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                    activeTag === tag
+                      ? 'bg-accent-100 text-accent-700 font-medium ring-1 ring-accent-300'
+                      : 'bg-surface-100 text-surface-600 hover:bg-accent-50 hover:text-accent-600'
+                  }`}
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -197,6 +219,29 @@ export default function KnowledgeView() {
             </div>
           ) : (
             <div className="p-4">
+              {/* Active filters indicator */}
+              {(selectedFolder || activeTag) && (
+                <div className="flex items-center gap-2 mb-3 text-xs text-surface-500">
+                  <span>筛选:</span>
+                  {selectedFolder && (
+                    <span
+                      className="bg-accent-50 text-accent-700 px-2 py-0.5 rounded cursor-pointer"
+                      onClick={() => setSelectedFolder(null)}
+                    >
+                      📁 {selectedFolder} ✕
+                    </span>
+                  )}
+                  {activeTag && (
+                    <span
+                      className="bg-accent-50 text-accent-700 px-2 py-0.5 rounded cursor-pointer"
+                      onClick={() => setActiveTag(null)}
+                    >
+                      #{activeTag} ✕
+                    </span>
+                  )}
+                  <span className="text-surface-400">({filteredNotes.length} 条)</span>
+                </div>
+              )}
               {filteredNotes.length === 0 ? (
                 <div className="text-center py-16 text-surface-400">
                   <Library className="w-10 h-10 text-surface-200 mx-auto mb-3" />
@@ -222,11 +267,13 @@ export default function KnowledgeView() {
                         </p>
                       </div>
                       {note.tags.length > 0 && (
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {note.tags.slice(0, 3).map((tag) => (
+                        <div className="flex gap-1">
+                          {note.tags.slice(0, 4).map((tag) => (
                             <span
                               key={tag}
-                              className="text-[10px] bg-surface-100 text-surface-500 px-1.5 py-0.5 rounded"
+                              onClick={(e) => { e.stopPropagation(); setActiveTag(tag) }}
+                              className="text-[10px] bg-surface-100 text-surface-500 px-1.5 py-0.5 rounded
+                                         hover:bg-accent-100 hover:text-accent-600 transition-colors cursor-pointer"
                             >
                               {tag}
                             </span>

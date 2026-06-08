@@ -106,4 +106,46 @@ tags: [diary]
 
     return result
   })
+
+  // Get diary entries within a date range
+  ipcMain.handle('diary:get-range', async (_event, startDate: string, endDate: string) => {
+    const vaultPath = getVaultPath()
+    if (!vaultPath) return []
+
+    const results: any[] = []
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+
+    const walkDiaryDir = (dir: string) => {
+      if (!fs.existsSync(dir)) return
+      const items = fs.readdirSync(dir)
+      for (const item of items) {
+        if (item.startsWith('.')) continue
+        const fullPath = path.join(dir, item)
+        if (fs.statSync(fullPath).isDirectory()) {
+          walkDiaryDir(fullPath)
+        } else if (item.endsWith('.md')) {
+          const dateStr = item.replace('.md', '')
+          const entryDate = new Date(dateStr)
+          if (!isNaN(entryDate.getTime()) && entryDate >= start && entryDate <= end) {
+            const content = fs.readFileSync(fullPath, 'utf-8')
+            const relPath = path.relative(vaultPath, fullPath).replace(/\\/g, '/')
+            // Extract first paragraph as preview
+            const previewMatch = content.match(/^#.+?\n\n([\s\S]{0,120})/)
+            const preview = previewMatch ? previewMatch[1].replace(/\n/g, ' ').trim() : ''
+            results.push({
+              path: relPath,
+              date: dateStr,
+              title: `${dateStr} 日记`,
+              preview,
+              updated_at: fs.statSync(fullPath).mtime.toISOString(),
+            })
+          }
+        }
+      }
+    }
+
+    walkDiaryDir(path.join(vaultPath, 'diary'))
+    return results.sort((a, b) => b.date.localeCompare(a.date))
+  })
 }
