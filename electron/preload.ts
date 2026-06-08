@@ -34,6 +34,7 @@ const api = {
     create: (folderPath: string, title: string) => ipcRenderer.invoke('notes:create', folderPath, title),
     delete: (filePath: string) => ipcRenderer.invoke('notes:delete', filePath),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('notes:rename', oldPath, newPath),
+    recent: () => ipcRenderer.invoke('notes:recent'),
   },
 
   // Diary

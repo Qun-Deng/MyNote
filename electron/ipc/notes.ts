@@ -1,6 +1,14 @@
 import { ipcMain } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import {
+  upsertNote,
+  getNoteByPath,
+  getAllNotes,
+  getRecentNotes,
+  deleteNoteByPath,
+  updateFTSIndex,
+} from '../db/queries'
 
 let vaultPath: string | null = null
 
@@ -69,12 +77,74 @@ function scanDirectory(dir: string, relativeTo: string): { name: string; path: s
   return entries
 }
 
+function syncNoteToDB(filePath: string, content: string) {
+  try {
+    const stat = fs.statSync(resolveNotePath(filePath))
+    const tags = extractTags(content)
+    upsertNote({
+      path: filePath,
+      title: getTitle(filePath, content),
+      created_at: stat.birthtime.toISOString(),
+      updated_at: stat.mtime.toISOString(),
+      tags: JSON.stringify(tags),
+      is_diary: filePath.startsWith('diary/') ? 1 : 0,
+      diary_date: filePath.startsWith('diary/') ? extractDiaryDate(filePath) : null,
+    })
+    // Update FTS index
+    try {
+      updateFTSIndex(filePath, getTitle(filePath, content), content)
+    } catch {}
+  } catch {
+    // DB might not be initialized yet, that's OK
+  }
+}
+
+function extractTags(content: string): string[] {
+  // Extract tags from frontmatter or from #tag syntax
+  const tags: string[] = []
+  // Frontmatter tags
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  if (fmMatch) {
+    const fm = fmMatch[1]
+    const tagMatch = fm.match(/tags:\s*\[([^\]]*)\]/)
+    if (tagMatch) {
+      tags.push(...tagMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, '')))
+    }
+  }
+  return tags
+}
+
+function extractDiaryDate(filePath: string): string | null {
+  // Extract date from diary/YYYY/YYYY-MM-DD.md
+  const match = filePath.match(/(\d{4}-\d{2}-\d{2})\.md$/)
+  return match ? match[1] : null
+}
+
 // ====== IPC Handlers ======
 
 export function registerNotesIPC() {
   // List all notes
   ipcMain.handle('notes:list', async () => {
     if (!vaultPath) return []
+
+    // Try DB first, fall back to file scan
+    try {
+      const dbNotes = getAllNotes()
+      if (dbNotes.length > 0) {
+        return dbNotes.map((row) => ({
+          id: row.id,
+          path: row.path,
+          title: row.title,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          tags: JSON.parse(row.tags || '[]'),
+          is_diary: row.is_diary === 1,
+          diary_date: row.diary_date,
+        }))
+      }
+    } catch {}
+
+    // Fall back to file system scan
     const notes: any[] = []
     const walkDir = (dir: string) => {
       if (!fs.existsSync(dir)) return
@@ -89,14 +159,14 @@ export function registerNotesIPC() {
           const stat = fs.statSync(fullPath)
           const content = fs.readFileSync(fullPath, 'utf-8')
           notes.push({
-            id: 0, // Will be populated by DB later
+            id: 0,
             path: relPath,
             title: getTitle(relPath, content),
             created_at: stat.birthtime.toISOString(),
             updated_at: stat.mtime.toISOString(),
-            tags: [],
+            tags: extractTags(content),
             is_diary: relPath.startsWith('diary/'),
-            diary_date: null,
+            diary_date: extractDiaryDate(relPath),
           })
         }
       }
@@ -114,19 +184,29 @@ export function registerNotesIPC() {
     const content = fs.readFileSync(fullPath, 'utf-8')
     const stat = fs.statSync(fullPath)
 
-    return {
-      meta: {
-        id: 0,
-        path: filePath,
-        title: getTitle(filePath, content),
-        created_at: stat.birthtime.toISOString(),
-        updated_at: stat.mtime.toISOString(),
-        tags: [],
-        is_diary: filePath.startsWith('diary/'),
-        diary_date: null,
-      },
-      content,
+    // Try DB for metadata, fall back to extraction
+    let meta: any
+    try {
+      const dbNote = getNoteByPath(filePath)
+      if (dbNote) {
+        meta = {
+          id: dbNote.id,
+          path: dbNote.path,
+          title: dbNote.title,
+          created_at: dbNote.created_at,
+          updated_at: dbNote.updated_at,
+          tags: JSON.parse(dbNote.tags || '[]'),
+          is_diary: dbNote.is_diary === 1,
+          diary_date: dbNote.diary_date,
+        }
+      } else {
+        meta = buildMetaFromFile(filePath, content, stat)
+      }
+    } catch {
+      meta = buildMetaFromFile(filePath, content, stat)
     }
+
+    return { meta, content }
   })
 
   // Write a note
@@ -135,18 +215,24 @@ export function registerNotesIPC() {
     const fullPath = resolveNotePath(filePath)
     ensureDir(path.dirname(fullPath))
     fs.writeFileSync(fullPath, content, 'utf-8')
+
+    // Sync to DB
+    syncNoteToDB(filePath, content)
   })
 
   // Create a note
   ipcMain.handle('notes:create', async (_event, folderPath: string, title: string) => {
     if (!vaultPath) throw new Error('Vault not initialized')
     const fileName = title.endsWith('.md') ? title : `${title}.md`
-    const filePath = path.join(folderPath, fileName)
+    const filePath = path.join(folderPath, fileName).replace(/\\/g, '/')
     const fullPath = resolveNotePath(filePath)
     ensureDir(path.dirname(fullPath))
 
     const template = `# ${title}\n\n`
     fs.writeFileSync(fullPath, template, 'utf-8')
+
+    // Sync to DB
+    syncNoteToDB(filePath, template)
 
     return {
       id: 0,
@@ -167,6 +253,10 @@ export function registerNotesIPC() {
     if (fs.existsSync(fullPath)) {
       fs.unlinkSync(fullPath)
     }
+    // Remove from DB
+    try {
+      deleteNoteByPath(filePath)
+    } catch {}
   })
 
   // Rename a note
@@ -185,4 +275,36 @@ export function registerNotesIPC() {
     if (!vaultPath) return []
     return scanDirectory(vaultPath, vaultPath)
   })
+
+  // Recent notes
+  ipcMain.handle('notes:recent', async () => {
+    try {
+      const rows = getRecentNotes(6)
+      return rows.map((row) => ({
+        id: row.id,
+        path: row.path,
+        title: row.title,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        tags: JSON.parse(row.tags || '[]'),
+        is_diary: row.is_diary === 1,
+        diary_date: row.diary_date,
+      }))
+    } catch {
+      return []
+    }
+  })
+}
+
+function buildMetaFromFile(filePath: string, content: string, stat: fs.Stats) {
+  return {
+    id: 0,
+    path: filePath,
+    title: getTitle(filePath, content),
+    created_at: stat.birthtime.toISOString(),
+    updated_at: stat.mtime.toISOString(),
+    tags: extractTags(content),
+    is_diary: filePath.startsWith('diary/'),
+    diary_date: extractDiaryDate(filePath),
+  }
 }

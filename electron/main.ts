@@ -4,6 +4,7 @@ import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
 import { registerDiaryIPC } from './ipc/diary'
 import { registerTodosIPC } from './ipc/todos'
 import { registerSearchIPC } from './ipc/search'
+import { initDatabase } from './db/connection'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -90,7 +91,7 @@ ipcMain.handle('vault:get-path', () => {
   return getVaultPath()
 })
 
-ipcMain.handle('vault:init', (_event, newVaultPath: string) => {
+ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
   setVaultPath(newVaultPath)
   // Create basic directory structure
   const fs = require('fs')
@@ -100,6 +101,12 @@ ipcMain.handle('vault:init', (_event, newVaultPath: string) => {
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true })
     }
+  }
+  // Initialize SQLite database
+  try {
+    await initDatabase(newVaultPath)
+  } catch (err) {
+    console.error('Failed to initialize database:', err)
   }
 })
 

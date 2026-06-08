@@ -1,11 +1,73 @@
-import { CalendarDays, CheckSquare, Clock, FileText, Plus } from 'lucide-react'
+import { CalendarDays, CheckSquare, FileText, Plus, Clock } from 'lucide-react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { useEffect, useState } from 'react'
+import type { NoteMeta, TodoItem } from '../../../shared/types'
+import { useUIStore } from '../../stores/uiStore'
+import { useNoteStore } from '../../stores/noteStore'
 
 export default function Dashboard() {
   const today = new Date()
   const greeting = getGreeting(today.getHours())
   const dateStr = format(today, 'yyyy年M月d日 EEEE', { locale: zhCN })
+
+  const [recentNotes, setRecentNotes] = useState<NoteMeta[]>([])
+  const [pendingTodos, setPendingTodos] = useState<TodoItem[]>([])
+  const [todayDiary, setTodayDiary] = useState<NoteMeta | null>(null)
+
+  const setActiveView = useUIStore((s) => s.setActiveView)
+  const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
+  const openNote = useNoteStore((s) => s.openNote)
+
+  const loadData = async () => {
+    try {
+      const [notes, todos, diary] = await Promise.all([
+        window.mynote.notes.recent().catch(() => []),
+        window.mynote.todos.list({ completed: false }).catch(() => []),
+        window.mynote.diary.get(format(today, 'yyyy-MM-dd')).catch(() => null),
+      ])
+      setRecentNotes(notes)
+      setPendingTodos(todos)
+      setTodayDiary(diary)
+    } catch {
+      // Silently fail — data will show as empty
+    }
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  const handleOpenNote = async (filePath: string) => {
+    await openNote(filePath)
+    setOpenNotePath(filePath)
+  }
+
+  const handleNewNote = async () => {
+    try {
+      const meta = await window.mynote.notes.create('notes', `新笔记 ${format(today, 'MM-dd HH:mm')}`)
+      await openNote(meta.path)
+      setOpenNotePath(meta.path)
+    } catch {}
+  }
+
+  const handleTodayDiary = async () => {
+    const dateStr = format(today, 'yyyy-MM-dd')
+    try {
+      let diary = todayDiary
+      if (!diary) {
+        diary = await window.mynote.diary.create(dateStr)
+      }
+      if (diary) {
+        await openNote(diary.path)
+        setOpenNotePath(diary.path)
+      }
+    } catch {}
+  }
+
+  const handleTodoView = () => {
+    setActiveView('todo')
+  }
 
   return (
     <div className="h-full overflow-auto">
@@ -24,16 +86,19 @@ export default function Dashboard() {
             icon={<FileText className="w-4 h-4" />}
             label="新建笔记"
             color="accent"
+            onClick={handleNewNote}
           />
           <QuickCard
             icon={<CalendarDays className="w-4 h-4" />}
-            label="今日日记"
+            label={todayDiary ? '编辑今日日记' : '今日日记'}
             color="green"
+            onClick={handleTodayDiary}
           />
           <QuickCard
             icon={<CheckSquare className="w-4 h-4" />}
-            label="添加待办"
+            label={`待办 (${pendingTodos.length})`}
             color="amber"
+            onClick={handleTodoView}
           />
         </div>
 
@@ -41,20 +106,57 @@ export default function Dashboard() {
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="card-title">最近笔记</h2>
-            <button className="text-xs text-accent-600 hover:text-accent-700 font-medium">
+            <button
+              onClick={() => setActiveView('knowledge')}
+              className="text-xs text-accent-600 hover:text-accent-700 font-medium"
+            >
               查看全部
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <EmptyCard
-              icon={<FileText className="w-8 h-8 text-surface-300" />}
-              text="还没有笔记，点击上方按钮创建你的第一篇笔记"
-            />
-            <EmptyCard
-              icon={<FileText className="w-8 h-8 text-surface-300" />}
-              text="笔记会在这里显示"
-            />
-          </div>
+          {recentNotes.length === 0 ? (
+            <div className="grid grid-cols-2 gap-3">
+              <EmptyCard
+                icon={<FileText className="w-8 h-8 text-surface-300" />}
+                text="还没有笔记，点击上方按钮创建你的第一篇笔记"
+              />
+              <EmptyCard
+                icon={<FileText className="w-8 h-8 text-surface-300" />}
+                text="笔记会在这里显示"
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {recentNotes.slice(0, 6).map((note) => (
+                <button
+                  key={note.path}
+                  onClick={() => handleOpenNote(note.path)}
+                  className="card text-left hover:border-accent-200 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <FileText className="w-4 h-4 text-surface-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-medium text-surface-800 truncate">
+                        {note.title}
+                      </h3>
+                      <p className="text-xs text-surface-400 mt-1 flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {format(new Date(note.updated_at), 'MM-dd HH:mm')}
+                      </p>
+                      {note.tags.length > 0 && (
+                        <div className="flex gap-1 mt-2">
+                          {note.tags.map((tag) => (
+                            <span key={tag} className="text-[10px] bg-surface-100 text-surface-500 px-1.5 py-0.5 rounded">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Today + Todos row */}
@@ -63,19 +165,37 @@ export default function Dashboard() {
           <section className="card">
             <div className="flex items-center justify-between mb-3">
               <h2 className="card-title">今日日记</h2>
-              <button className="p-1 hover:bg-surface-100 rounded transition-colors">
+              <button
+                onClick={handleTodayDiary}
+                className="p-1 hover:bg-surface-100 rounded transition-colors"
+              >
                 <Plus className="w-4 h-4 text-surface-400" />
               </button>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
-                <CalendarDays className="w-5 h-5 text-amber-500" />
+            {todayDiary ? (
+              <button
+                onClick={handleTodayDiary}
+                className="w-full text-left flex items-center gap-3 p-2 hover:bg-surface-50 rounded-md transition-colors"
+              >
+                <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
+                  <CalendarDays className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-surface-700">{todayDiary.title}</p>
+                  <p className="text-xs text-surface-400 mt-0.5">点击编辑今日日记</p>
+                </div>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
+                  <CalendarDays className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-surface-700">还没有今日日记</p>
+                  <p className="text-xs text-surface-400 mt-0.5">点击右上角 + 开始写作</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-surface-700">还没有今日日记</p>
-                <p className="text-xs text-surface-400 mt-0.5">点击右上角 + 开始写作</p>
-              </div>
-            </div>
+            )}
           </section>
 
           {/* Pending Todos */}
@@ -84,13 +204,29 @@ export default function Dashboard() {
               <h2 className="card-title">待办事项</h2>
               <span className="text-xs text-surface-400">
                 <Clock className="w-3 h-3 inline mr-1" />
-                0 条待办
+                {pendingTodos.length} 条待办
               </span>
             </div>
-            <div className="text-center py-4">
-              <CheckSquare className="w-8 h-8 text-surface-200 mx-auto mb-2" />
-              <p className="text-xs text-surface-400">所有待办已完成 🎉</p>
-            </div>
+            {pendingTodos.length === 0 ? (
+              <div className="text-center py-4">
+                <CheckSquare className="w-8 h-8 text-surface-200 mx-auto mb-2" />
+                <p className="text-xs text-surface-400">所有待办已完成 🎉</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {pendingTodos.slice(0, 5).map((todo) => (
+                  <div key={todo.id} className="flex items-center gap-2 py-1 text-sm text-surface-700">
+                    <div className="w-4 h-4 border-2 border-surface-300 rounded flex-shrink-0" />
+                    <span className="truncate">{todo.content}</span>
+                  </div>
+                ))}
+                {pendingTodos.length > 5 && (
+                  <p className="text-xs text-surface-400 pt-1">
+                    还有 {pendingTodos.length - 5} 条待办...
+                  </p>
+                )}
+              </div>
+            )}
           </section>
         </div>
       </div>
@@ -102,10 +238,12 @@ function QuickCard({
   icon,
   label,
   color,
+  onClick,
 }: {
   icon: React.ReactNode
   label: string
   color: 'accent' | 'green' | 'amber'
+  onClick: () => void
 }) {
   const colorClasses = {
     accent: 'bg-accent-50 text-accent-600 hover:bg-accent-100 border-accent-200',
@@ -114,6 +252,7 @@ function QuickCard({
   }
   return (
     <button
+      onClick={onClick}
       className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${colorClasses[color]}`}
     >
       {icon}
