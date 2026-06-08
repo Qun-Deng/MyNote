@@ -123,10 +123,20 @@ export default function DiaryView() {
         let diary = await window.mynote.diary.get(selectedDate)
         if (!diary) diary = await window.mynote.diary.create(selectedDate)
         const result = await window.mynote.notes.read(diary.path)
-        if (!cancelled && result) {
-          setDiaryContent(result.content)
-          setDiaryPath(result.meta.path)
-          setDiaryDates((prev) => new Set(prev).add(selectedDate))
+        if (!cancelled) {
+          if (result) {
+            setDiaryContent(result.content)
+            setDiaryPath(result.meta.path)
+            setDiaryDates((prev) => new Set(prev).add(selectedDate))
+          } else {
+            // File was deleted externally, recreate
+            diary = await window.mynote.diary.create(selectedDate)
+            const retry = await window.mynote.notes.read(diary.path)
+            if (retry) {
+              setDiaryContent(retry.content)
+              setDiaryPath(retry.meta.path)
+            }
+          }
         }
       } catch {} finally { if (!cancelled) setLoading(false) }
     }
@@ -151,12 +161,21 @@ export default function DiaryView() {
   const blocks = parseTimeBlocks(diaryContent)
 
   const handleAddBlock = async () => {
-    if (!newStart || !newText || !diaryPath) return
+    if (!newStart || !newText) return
+    // Auto-create diary if needed
+    let path = diaryPath
+    let content = diaryContent
+    if (!path) {
+      const diary = await window.mynote.diary.create(selectedDate)
+      path = diary.path
+      content = ''  // fresh diary
+      setDiaryPath(path)
+      setDiaryDates((prev) => new Set(prev).add(selectedDate))
+    }
     const endStr = newEnd ? `-${newEnd}` : ''
-    // Format: [HH:MM-HH:MM] text
     const line = `[${newStart}${endStr}] ${newText}`
-    const newContent = insertBlockIntoContent(diaryContent, line)
-    await window.mynote.notes.write(diaryPath, newContent)
+    const newContent = insertBlockIntoContent(content, line)
+    await window.mynote.notes.write(path!, newContent)
     setDiaryContent(newContent)
     setNewStart(''); setNewEnd(''); setNewText(''); setShowAdd(false)
   }
@@ -171,6 +190,8 @@ export default function DiaryView() {
       await window.mynote.notes.write(diaryPath, nc)
       setDiaryContent(nc)
     }
+    // If no blocks left, optionally delete the diary file?
+    // For now, just keep empty diary
   }
 
   const handleEditDiary = async () => {
