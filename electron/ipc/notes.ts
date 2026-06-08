@@ -340,21 +340,56 @@ export function registerNotesIPC() {
 
   // Recent notes
   ipcMain.handle('notes:recent', async () => {
+    // Try DB first
     try {
       const rows = getRecentNotes(6)
-      return rows.map((row) => ({
-        id: row.id,
-        path: row.path,
-        title: row.title,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        tags: JSON.parse(row.tags || '[]'),
-        is_diary: row.is_diary === 1,
-        diary_date: row.diary_date,
-      }))
-    } catch {
-      return []
+      if (rows.length > 0) {
+        return rows.map((row) => ({
+          id: row.id,
+          path: row.path,
+          title: row.title,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          tags: JSON.parse(row.tags || '[]'),
+          is_diary: row.is_diary === 1,
+          diary_date: row.diary_date,
+        }))
+      }
+    } catch {}
+
+    // Fallback: file-system scan sorted by modification time
+    if (!vaultPath) return []
+    const notes: any[] = []
+    const walkDir = (dir: string) => {
+      if (!fs.existsSync(dir)) return
+      const items = fs.readdirSync(dir)
+      for (const item of items) {
+        if (item.startsWith('.')) continue
+        const fullPath = path.join(dir, item)
+        if (fs.statSync(fullPath).isDirectory()) {
+          walkDir(fullPath)
+        } else if (item.endsWith('.md')) {
+          const relPath = path.relative(vaultPath!, fullPath).replace(/\\/g, '/')
+          // Skip diary notes for recent list
+          if (relPath.startsWith('diary/')) return
+          const stat = fs.statSync(fullPath)
+          const content = fs.readFileSync(fullPath, 'utf-8')
+          notes.push({
+            id: 0,
+            path: relPath,
+            title: getTitle(relPath, content),
+            created_at: stat.birthtime.toISOString(),
+            updated_at: stat.mtime.toISOString(),
+            tags: extractTags(content),
+            is_diary: false,
+            diary_date: null,
+          })
+        }
+      }
     }
+    walkDir(vaultPath)
+    notes.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    return notes.slice(0, 6)
   })
 
   // Get all tags

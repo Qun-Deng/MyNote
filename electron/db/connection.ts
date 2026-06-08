@@ -20,6 +20,10 @@ export async function initDatabase(vaultPath: string): Promise<Database> {
     saveDatabase()
   }
 
+  // Run migrations for both new and existing databases
+  try { db.run('ALTER TABLE todos ADD COLUMN deadline TEXT') } catch { /* column already exists */ }
+  saveDatabase()
+
   return db
 }
 
@@ -56,7 +60,8 @@ function createSchema(db: Database) {
       line_number INTEGER,
       created_at  TEXT NOT NULL,
       completed_at TEXT,
-      priority    INTEGER DEFAULT 0
+      priority    INTEGER DEFAULT 0,
+      deadline    TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tags (

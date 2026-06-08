@@ -74,6 +74,17 @@ const api = {
     toggle: (todoId: number) => ipcRenderer.invoke('todos:toggle', todoId),
     syncAll: () => ipcRenderer.invoke('todos:sync-all'),
     extract: (filePath: string, content: string) => ipcRenderer.invoke('todos:extract', filePath, content),
+    add: (notePath: string, content: string, deadline?: string) => ipcRenderer.invoke('todos:add', notePath, content, deadline),
+    delete: (todoId: number) => ipcRenderer.invoke('todos:delete', todoId),
+    updateDeadline: (todoId: number, deadline: string | null) => ipcRenderer.invoke('todos:update-deadline', todoId, deadline),
+  },
+
+  // Todo Page — independent JSON-based storage
+  todoPage: {
+    list: () => ipcRenderer.invoke('todo-page:list'),
+    add: (content: string, section: string) => ipcRenderer.invoke('todo-page:add', content, section),
+    delete: (id: string) => ipcRenderer.invoke('todo-page:delete', id),
+    toggle: (id: string) => ipcRenderer.invoke('todo-page:toggle', id),
   },
 
   // Search
