@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
-import { Editor, rootCtx, defaultValueCtx } from '@milkdown/kit/core'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
+import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { history } from '@milkdown/kit/plugin/history'
@@ -7,7 +8,24 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 import { prism } from '@milkdown/plugin-prism'
 import { emoji } from '@milkdown/plugin-emoji'
 import { clipboard } from '@milkdown/kit/plugin/clipboard'
+import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state'
+import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
+import { $prose } from '@milkdown/utils'
 import type { Ctx } from '@milkdown/ctx'
+import {
+  executeTableAction,
+  executeEditorAction,
+  filterSlashActions,
+  getSlashTrigger,
+  getTableCellPosition,
+  handleCollapsibleListClick,
+  handleEditorShortcut,
+  handleTableCellMouseDown,
+  handleTaskItemClick,
+  type TableActionId,
+  type SlashTrigger,
+} from './editorInteractions'
 import '../../styles/milkdown.css'
 
 interface MilkdownEditorProps {
@@ -57,11 +75,204 @@ function configureEditor(container: HTMLDivElement, initialContent: string) {
   }
 }
 
+function appendEditableParagraphIfNeeded(editor: Editor) {
+  const view = editor.ctx.get(editorViewCtx)
+  const { doc, schema } = view.state
+  const lastNode = doc.lastChild
+  if (lastNode?.type.name === 'paragraph') return
+
+  const paragraph = schema.nodes.paragraph.create()
+  view.dispatch(view.state.tr.insert(doc.content.size, paragraph))
+}
+
+// ── ProseMirror indent-decoration plugin ──────────────────────────
+// Uses ProseMirror's native Decoration system so the visual markers
+// survive re-renders without manual DOM surgery.
+
+const indentPluginKey = new PluginKey('mdIndent')
+
+const SKIP_PARENTS = new Set([
+  'list_item', 'bullet_list', 'ordered_list',
+  'table', 'table_row', 'table_cell', 'table_header',
+  'code_block',
+])
+
+function computeIndentLevel(text: string) {
+  const leading = text.match(/^[\t ]+/)?.[0] ?? ''
+  if (!leading) return 0
+  const width = [...leading].reduce((sum, ch) => sum + (ch === '\t' ? 2 : 1), 0)
+  return Math.min(6, Math.floor(width / 2))
+}
+
+function buildIndentDecorations(doc: ProseNode) {
+  const decos: Decoration[] = []
+
+  doc.descendants((node: ProseNode, pos: number) => {
+    if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return
+
+    // Skip if inside a list / table / code-block
+    const $pos = doc.resolve(pos)
+    for (let d = $pos.depth - 1; d >= 0; d -= 1) {
+      if (SKIP_PARENTS.has($pos.node(d).type.name)) return
+    }
+
+    const level = computeIndentLevel(node.textContent)
+    if (level === 0) return
+
+    decos.push(
+      Decoration.node(pos, pos + node.nodeSize, {
+        class: `md-indent md-indent-${level}`,
+      }),
+    )
+  })
+
+  return DecorationSet.create(doc, decos)
+}
+
+const markdownIndentProsePlugin = new Plugin({
+  key: indentPluginKey,
+  state: {
+    init(_, state) {
+      return buildIndentDecorations(state.doc)
+    },
+    apply(tr, prev, _oldState, newState) {
+      if (!tr.docChanged) return prev
+      return buildIndentDecorations(newState.doc)
+    },
+  },
+  props: {
+    decorations(state) {
+      return indentPluginKey.getState(state)
+    },
+  },
+})
+
+// Wrap as a Milkdown plugin so it can be .use()-d in the editor chain.
+const markdownIndent = $prose(() => markdownIndentProsePlugin)
+
 export default function MilkdownEditor({ content, onContentChange, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
+  const tableActionLockRef = useRef(false)
   const initialized = useRef(false)
   const frontmatterRef = useRef('')
+  const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
+  const [tableAddControls, setTableAddControls] = useState<{
+    cellPos: number
+    rowDeleteLeft: number
+    rowDeleteTop: number
+    rowLeft: number
+    rowTop: number
+    colDeleteLeft: number
+    colDeleteTop: number
+    colLeft: number
+    colTop: number
+  } | null>(null)
+
+  const slashItems = useMemo(() => {
+    return slashTrigger ? filterSlashActions(slashTrigger.query) : []
+  }, [slashTrigger])
+
+  const closeSlashMenu = () => {
+    setSlashTrigger(null)
+    setSelectedSlashIndex(0)
+  }
+
+  const closeTableAddControls = () => setTableAddControls(null)
+
+  const syncSlashMenu = () => {
+    const editor = editorRef.current
+    const container = containerRef.current
+    if (!editor || !container || readOnly) return
+    const trigger = getSlashTrigger(editor, container)
+    setSlashTrigger((prev) => {
+      // Only reset selected index when query actually changed
+      if (trigger && prev && trigger.query === prev.query) {
+        return trigger
+      }
+      setSelectedSlashIndex(0)
+      return trigger
+    })
+  }
+
+  const runSlashAction = (actionId: string) => {
+    const editor = editorRef.current
+    if (!editor || !slashTrigger) return
+    executeEditorAction(editor, actionId, slashTrigger)
+    closeSlashMenu()
+    closeTableAddControls()
+  }
+
+  const runTableAction = (actionId: TableActionId, cellPos: number) => {
+    const editor = editorRef.current
+    if (!editor || tableActionLockRef.current) return
+    tableActionLockRef.current = true
+    try {
+      executeTableAction(editor, actionId, cellPos)
+      closeTableAddControls()
+    } finally {
+      window.setTimeout(() => {
+        tableActionLockRef.current = false
+      })
+    }
+  }
+
+  const syncTableAddControls = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const editor = editorRef.current
+    const shell = containerRef.current?.parentElement
+    const target = event.target
+    if (!editor || !shell || !(target instanceof HTMLElement)) return
+    if (target.closest('.md-table-edge-control')) return
+
+    const cell = target.closest<HTMLElement>('td, th')
+    if (!cell) {
+      closeTableAddControls()
+      return
+    }
+
+    const cellPos = getTableCellPosition(editor, cell, {
+      left: event.clientX,
+      top: event.clientY,
+    })
+    if (cellPos === false) {
+      closeTableAddControls()
+      return
+    }
+
+    const shellRect = shell.getBoundingClientRect()
+    const cellRect = cell.getBoundingClientRect()
+    setTableAddControls({
+      cellPos,
+      rowDeleteLeft: cellRect.left - shellRect.left,
+      rowDeleteTop: cellRect.top + cellRect.height / 2 - shellRect.top,
+      rowLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
+      rowTop: cellRect.bottom - shellRect.top,
+      colDeleteLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
+      colDeleteTop: cellRect.top - shellRect.top,
+      colLeft: cellRect.right - shellRect.left,
+      colTop: cellRect.top + cellRect.height / 2 - shellRect.top,
+    })
+  }
+
+  const focusEditorEnd = () => {
+    const editor = editorRef.current
+    if (!editor) return
+    const view = editor.ctx.get(editorViewCtx)
+    const endPos = Math.max(1, view.state.doc.content.size - 1)
+    const selection = TextSelection.near(view.state.doc.resolve(endPos))
+    view.dispatch(view.state.tr.setSelection(selection).scrollIntoView())
+    view.focus()
+  }
+
+  const handleKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || slashTrigger) return
+    const editor = editorRef.current
+    if (!editor) return
+    if (handleEditorShortcut(editor, event)) {
+      closeSlashMenu()
+    }
+  }
 
   // Initialize editor once per mount (key changes trigger remount)
   useEffect(() => {
@@ -82,16 +293,22 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
       .use(prism)
       .use(emoji)
       .use(clipboard)
+      .use(markdownIndent)
       .create()
       .then((created) => {
         editor = created
         editorRef.current = editor
+        appendEditableParagraphIfNeeded(editor)
 
         // Register markdown change listener
         const listenerManager = editor.ctx.get(listenerCtx)
         listenerManager.markdownUpdated((_ctx, markdown) => {
           onContentChange(mergeFrontmatter(frontmatterRef.current, markdown))
         })
+      })
+      .catch((err) => {
+        console.error('Failed to create Milkdown editor:', err)
+        initialized.current = false
       })
 
     return () => {
@@ -103,11 +320,179 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
     }
   }, []) // Only create on mount
 
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleClick = (event: MouseEvent) => {
+      const editor = editorRef.current
+      if (editor && handleTaskItemClick(editor, event)) return
+      if (handleCollapsibleListClick(event)) return
+      closeSlashMenu()
+    }
+
+    container.addEventListener('click', handleClick)
+    return () => {
+      container.removeEventListener('click', handleClick)
+    }
+  }, [])
+
   return (
-    <div
-      ref={containerRef}
-      className="milkdown-editor-container"
-      data-readonly={readOnly}
-    />
+    <div className="milkdown-editor-shell" onMouseLeave={closeTableAddControls}>
+      <div
+        ref={containerRef}
+        className="milkdown-editor-container"
+        data-readonly={readOnly}
+        onMouseMove={syncTableAddControls}
+        onKeyDownCapture={handleKeyDownCapture}
+        onMouseDown={(event) => {
+          const target = event.target
+          if (!(target instanceof HTMLElement)) return
+          const editor = editorRef.current
+          if (editor) handleTableCellMouseDown(editor, event.nativeEvent)
+          if (target.closest('.ProseMirror')) return
+          event.preventDefault()
+          focusEditorEnd()
+        }}
+        onKeyDown={(event) => {
+          const editor = editorRef.current
+          if (!editor) return
+
+          if (slashTrigger) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setSelectedSlashIndex((index) => (index + 1) % Math.max(slashItems.length, 1))
+              return
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setSelectedSlashIndex((index) => {
+                return (index - 1 + Math.max(slashItems.length, 1)) % Math.max(slashItems.length, 1)
+              })
+              return
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+              event.preventDefault()
+              const item = slashItems[selectedSlashIndex]
+              if (item) runSlashAction(item.id)
+              return
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              closeSlashMenu()
+              return
+            }
+          }
+
+          if (handleEditorShortcut(editor, event)) {
+            closeSlashMenu()
+          }
+        }}
+        onKeyUp={(event) => {
+          // Don't sync on navigation/action keys — avoids resetting selection in slash menu
+          if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'ArrowDown' || event.key === 'ArrowUp') return
+          window.setTimeout(syncSlashMenu)
+        }}
+      />
+
+      {slashTrigger && slashItems.length > 0 && (
+        <div
+          className="md-slash-menu"
+          style={{ left: slashTrigger.left, top: slashTrigger.top }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {slashItems.map((item, index) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`md-slash-item ${index === selectedSlashIndex ? 'active' : ''}`}
+              onMouseEnter={() => setSelectedSlashIndex(index)}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                runSlashAction(item.id)
+              }}
+            >
+              <span>
+                <strong>{item.label}</strong>
+                {item.description && <small>{item.description}</small>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tableAddControls && (
+        <>
+          <button
+            type="button"
+            className="md-table-edge-control md-table-delete-control md-table-delete-row"
+            style={{ left: tableAddControls.rowDeleteLeft, top: tableAddControls.rowDeleteTop }}
+            title="删除当前行"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              runTableAction('delete-row', tableAddControls.cellPos)
+            }}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="md-table-edge-control md-table-delete-control md-table-delete-column"
+            style={{ left: tableAddControls.colDeleteLeft, top: tableAddControls.colDeleteTop }}
+            title="删除当前列"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              runTableAction('delete-column', tableAddControls.cellPos)
+            }}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="md-table-edge-control md-table-add-control md-table-add-row"
+            style={{ left: tableAddControls.rowLeft, top: tableAddControls.rowTop }}
+            title="在下方插入行"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              runTableAction('insert-row-after', tableAddControls.cellPos)
+            }}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="md-table-edge-control md-table-add-control md-table-add-column"
+            style={{ left: tableAddControls.colLeft, top: tableAddControls.colTop }}
+            title="在右侧插入列"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              runTableAction('insert-column-after', tableAddControls.cellPos)
+            }}
+          >
+            +
+          </button>
+        </>
+      )}
+    </div>
   )
 }
