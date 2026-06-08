@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ====== Base Styles ====== */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-surface-50 text-surface-800;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-400;
+  }
+}
+
+/* ====== App Layout ====== */
+@layer components {
+  .app-container {
+    @apply h-screen flex flex-col;
+    /* Make room for custom titlebar drag region */
+  }
+
+  .titlebar {
+    @apply h-9 flex items-center justify-between px-3 bg-surface-100 border-b border-surface-200;
+    -webkit-app-region: drag;
+  }
+
+  .titlebar-buttons {
+    -webkit-app-region: no-drag;
+  }
+
+  .main-layout {
+    @apply flex flex-1 overflow-hidden;
+  }
+
+  .sidebar {
+    @apply w-56 flex-shrink-0 bg-surface-50 border-r border-surface-200 flex flex-col;
+  }
+
+  .content-area {
+    @apply flex-1 overflow-auto bg-white;
+  }
+
+  .statusbar {
+    @apply h-6 flex items-center px-3 text-xs text-surface-500 bg-surface-100 border-t border-surface-200 gap-4;
+  }
+}
+
+/* ====== Sidebar Components ====== */
+@layer components {
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3 py-2 mx-1.5 rounded-md text-sm text-surface-600
+           hover:bg-surface-100 hover:text-surface-900 cursor-pointer transition-colors;
+  }
+
+  .nav-item.active {
+    @apply bg-accent-50 text-accent-700 font-medium;
+  }
+
+  .nav-item .nav-icon {
+    @apply w-4 h-4 flex-shrink-0;
+  }
+}
+
+/* ====== Dashboard Cards ====== */
+@layer components {
+  .card {
+    @apply bg-white rounded-lg border border-surface-200 p-4
+           hover:border-surface-300 transition-colors;
+  }
+
+  .card-title {
+    @apply text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3;
+  }
+}
+
+/* ====== Editor Area ====== */
+@layer components {
+  .editor-container {
+    @apply h-full max-w-3xl mx-auto py-8 px-6;
+  }
+
+  .milkdown {
+    @apply prose prose-slate max-w-none;
+  }
+}
+
+/* ====== Calendar ====== */
+@layer components {
+  .calendar-grid {
+    @apply grid grid-cols-7 gap-px bg-surface-200 rounded-lg overflow-hidden;
+  }
+
+  .calendar-day-header {
+    @apply bg-surface-50 text-xs font-medium text-surface-500 uppercase text-center py-2;
+  }
+
+  .calendar-day {
+    @apply bg-white text-sm text-center py-2 cursor-pointer hover:bg-accent-50 transition-colors;
+  }
+
+  .calendar-day.today {
+    @apply bg-accent-50 text-accent-700 font-semibold;
+  }
+
+  .calendar-day.has-entry::after {
+    content: '';
+    @apply block w-1 h-1 bg-accent-500 rounded-full mx-auto mt-0.5;
+  }
+
+  .calendar-day.other-month {
+    @apply text-surface-300;
+  }
+}
