@@ -241,7 +241,20 @@ function App() {
                     {currentMeta.title}
                   </button>
                 )}
-                <span className="text-xs text-surface-400 ml-auto">
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await window.mynote.export.pdf(currentContent, currentMeta.title)
+                      if (r.success) alert(`已导出: ${r.output}`)
+                      else if (r.output !== 'Cancelled') alert(`导出失败: ${r.output}`)
+                    } catch { alert('导出失败') }
+                  }}
+                  className="text-xs text-surface-500 hover:text-accent-600 font-medium px-2 py-1 rounded hover:bg-surface-100 transition-colors ml-auto"
+                  title="导出 PDF"
+                >
+                  📄 导出
+                </button>
+                <span className="text-xs text-surface-400">
                   {currentMeta.path}
                 </span>
               </div>

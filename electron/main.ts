@@ -5,6 +5,8 @@ import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
 import { registerDiaryIPC } from './ipc/diary'
 import { registerTodosIPC } from './ipc/todos'
 import { registerSearchIPC } from './ipc/search'
+import { registerGitIPC } from './ipc/git'
+import { registerExportIPC } from './ipc/export'
 import { initDatabase } from './db/connection'
 
 let mainWindow: BrowserWindow | null = null
@@ -242,6 +244,8 @@ registerNotesIPC()
 registerDiaryIPC()
 registerTodosIPC()
 registerSearchIPC()
+registerGitIPC()
+registerExportIPC()
 
 // ====== App Lifecycle ======
 

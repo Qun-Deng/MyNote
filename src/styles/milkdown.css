@@ -113,7 +113,7 @@
 
 .milkdown-editor-container p {
   position: relative;
-  margin: 1.05em 0;
+  margin: 0.35em 0;
   white-space: pre-wrap;
   tab-size: 2;
 }
@@ -222,7 +222,7 @@
 
 .milkdown-editor-container ul,
 .milkdown-editor-container ol {
-  margin: 1em 0;
+  margin: 0.35em 0;
   padding-left: 1.65em;
 }
 
@@ -415,7 +415,7 @@
 .milkdown-editor-container [data-type="taskItem"] {
   position: relative;
   list-style: none;
-  padding-left: 1.7em;
+  padding-left: 0;
 }
 
 .milkdown-editor-container li[data-item-type="task"] > p,
@@ -427,8 +427,8 @@
 .milkdown-editor-container [data-type="taskItem"]::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0.58em;
+  left: -1.4em;
+  top: 0.5em;
   box-sizing: border-box;
   width: 1em;
   height: 1em;
