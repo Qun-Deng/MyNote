@@ -66,9 +66,11 @@ tags: [diary]
 
 # ${dateStr} ${weekday}
 
-## 今日记录
+## [今日记录]
 
-## 待办
+## [待办事项]
+
+## [想法记录]
 `
 
     fs.writeFileSync(fullPath, template, 'utf-8')

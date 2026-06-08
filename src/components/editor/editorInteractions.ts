@@ -176,11 +176,6 @@ function findListItemPos(view: EditorView, listItem: HTMLLIElement): { pos: numb
   return found
 }
 
-function parseCssNumber(value: string, fallback: number) {
-  const parsed = Number.parseFloat(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
 function findTableCellPos(
   view: EditorView,
   cell: Element,
@@ -213,47 +208,112 @@ export function getTableCellPosition(
 
 export function executeEditorAction(editor: Editor, actionId: string, range?: SlashRange) {
   const view = getView(editor)
-  deleteRange(view, range)
-  view.focus()
+
+  // For todo/toggle-list we capture paragraph state BEFORE deletion
+  // so we can split at soft-newline boundaries.  Other actions just
+  // delete the slash text immediately.
+  if (actionId !== 'todo' && actionId !== 'toggle-list') {
+    deleteRange(view, range)
+    view.focus()
+  }
 
   switch (actionId) {
-    case 'todo': {
-      const { state, dispatch } = view
-      const { schema } = state
-      const { from, to, text } = getCurrentParagraph(view)
-      const taskText = text || '待办事项'
-
-      const taskNode = schema.nodes.bullet_list.create({}, [
-        schema.nodes.list_item.create({ checked: false }, [
-          paragraphNode(schema, taskText),
-        ]),
-      ])
-
-      const tr = state.tr.replaceWith(from, to, taskNode)
-      dispatch(tr.scrollIntoView())
-      selectTextRange(view, from, taskText)
-      return true
-    }
+    case 'todo':
     case 'toggle-list': {
+      if (!range) return false
+
+      // Capture paragraph state BEFORE deleting the slash trigger,
+      // so we can split at soft-newline boundaries if needed.
+      const paraBefore = getCurrentParagraph(view)
+      const paraTextBefore = view.state.doc.textBetween(
+        paraBefore.from + 1,
+        paraBefore.to - 1,
+      )
+      // Find soft-newline boundaries around the slash within the paragraph
+      const slashOffset = range.from - paraBefore.from - 1 // offset inside para text
+      let lineStart = 0
+      let lineEnd = paraTextBefore.length
+      for (let i = slashOffset - 1; i >= 0; i -= 1) {
+        if (paraTextBefore[i] === '\n') { lineStart = i + 1; break }
+      }
+      for (let i = slashOffset; i < paraTextBefore.length; i += 1) {
+        if (paraTextBefore[i] === '\n') { lineEnd = i; break }
+      }
+      // Text before the slash line (exclude the \n that starts it)
+      const beforeText = lineStart > 0
+        ? paraTextBefore.slice(0, lineStart - 1)
+        : ''
+      // Text after the slash line (exclude the \n that ends it)
+      const afterText = lineEnd < paraTextBefore.length
+        ? paraTextBefore.slice(lineEnd + 1)
+        : ''
+
+      // Delete the slash trigger text
+      deleteRange(view, range)
+      view.focus()
+
       const { state, dispatch } = view
       const { schema } = state
-      const { from, to, text } = getCurrentParagraph(view)
-      const title = text || '折叠列表'
+      const { from, to } = getCurrentParagraph(view)
 
-      const toggleNode = schema.nodes.bullet_list.create({}, [
-        schema.nodes.list_item.create({}, [
-          paragraphNode(schema, title),
-          schema.nodes.bullet_list.create({}, [
-            schema.nodes.list_item.create({}, [
-              paragraphNode(schema, ''),
+      const isTodo = actionId === 'todo'
+      const defaultLabel = isTodo ? '待办事项' : '折叠列表'
+
+      const createItem = () => {
+        if (isTodo) {
+          return schema.nodes.bullet_list.create({}, [
+            schema.nodes.list_item.create({ checked: false }, [
+              paragraphNode(schema, defaultLabel),
+            ]),
+          ])
+        }
+        return schema.nodes.bullet_list.create({}, [
+          schema.nodes.list_item.create({}, [
+            paragraphNode(schema, defaultLabel),
+            schema.nodes.bullet_list.create({}, [
+              schema.nodes.list_item.create({}, [
+                paragraphNode(schema, ''),
+              ]),
             ]),
           ]),
-        ]),
-      ])
+        ])
+      }
 
-      const tr = state.tr.replaceWith(from, to, toggleNode)
-      dispatch(tr.scrollIntoView())
-      selectTextRange(view, from, title)
+      const hasAdjacentContent = beforeText.trim() || afterText.trim()
+
+      if (hasAdjacentContent) {
+        // Split the paragraph: keep beforeText / afterText as paragraphs,
+        // insert the item where the slash line was.
+        const parts: any[] = []
+        if (beforeText.trim()) {
+          parts.push(schema.nodes.paragraph.create({}, schema.text(beforeText.trim())))
+        }
+        parts.push(createItem())
+        if (afterText.trim()) {
+          parts.push(schema.nodes.paragraph.create({}, schema.text(afterText.trim())))
+        }
+        const tr = state.tr.replaceWith(from, to, parts)
+        dispatch(tr.scrollIntoView())
+        setSelectionNear(view, from + (beforeText.trim() ? 2 : 0) + 1)
+      } else {
+        // Entire paragraph was just the slash line — replace it.
+        const item = createItem()
+        const tr = state.tr.replaceWith(from, to, item)
+        dispatch(tr.scrollIntoView())
+        const label = defaultLabel
+        try {
+          const start = from + 3
+          const end = start + label.length
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, start, end))
+              .scrollIntoView(),
+          )
+          view.focus()
+        } catch {
+          setSelectionNear(view, from + 3 + label.length)
+        }
+      }
       return true
     }
     case 'bullet-list':
@@ -496,25 +556,3 @@ export function handleTaskItemClick(editor: Editor, event: MouseEvent) {
   return true
 }
 
-export function handleCollapsibleListClick(event: MouseEvent) {
-  const target = event.target
-  if (!(target instanceof HTMLElement)) return false
-  const item = target.closest<HTMLLIElement>('li')
-  if (!item) return false
-  if (!item.querySelector(':scope > ul, :scope > ol')) return false
-  const rect = item.getBoundingClientRect()
-  const before = window.getComputedStyle(item, '::before')
-  const iconLeft = rect.left + parseCssNumber(before.left, -24)
-  const iconWidth = parseCssNumber(before.width, 18)
-  const iconTop = rect.top + parseCssNumber(before.top, 6)
-  const iconHeight = parseCssNumber(before.height, 18)
-  const inToggleX = event.clientX >= iconLeft - 6 && event.clientX <= iconLeft + iconWidth + 6
-  const inToggleY = event.clientY >= iconTop - 6 && event.clientY <= iconTop + iconHeight + 6
-  if (!inToggleX || !inToggleY) return false
-
-  event.preventDefault()
-  event.stopPropagation()
-
-  item.classList.toggle('md-list-collapsed')
-  return true
-}
