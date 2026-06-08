@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
@@ -180,32 +180,55 @@ ipcMain.handle('vault:delete-item', async (_event, itemPath: string) => {
 })
 
 ipcMain.handle('vault:show-context-menu', async (_event, itemPath: string, itemType: 'file' | 'directory') => {
-  const { Menu } = require('electron')
+  const vp = getVaultPath()
+  const targetPath = itemPath || ''
+  const targetFullPath = vp ? path.join(vp, targetPath) : null
+  const targetExists = !!targetFullPath && fs.existsSync(targetFullPath)
+  const targetIsRoot = targetPath === ''
+  const rawParentPath = itemType === 'directory' ? targetPath : path.dirname(targetPath)
+  const parentPath = rawParentPath === '.' ? '' : rawParentPath
+  const newNoteTarget = parentPath || 'notes'
+
   const template: any[] = [
     {
       label: '新建笔记',
       click: () => {
-        mainWindow?.webContents.send('context-menu:new-note', itemType === 'directory' ? itemPath : path.dirname(itemPath))
+        mainWindow?.webContents.send('context-menu:new-note', newNoteTarget)
       },
     },
     {
       label: '新建文件夹',
       click: () => {
-        mainWindow?.webContents.send('context-menu:new-folder', itemType === 'directory' ? itemPath : path.dirname(itemPath))
+        mainWindow?.webContents.send('context-menu:new-folder', parentPath)
       },
     },
     { type: 'separator' },
     {
       label: '重命名',
+      enabled: !targetIsRoot && targetExists,
       click: () => {
-        mainWindow?.webContents.send('context-menu:rename', itemPath)
+        mainWindow?.webContents.send('context-menu:rename', targetPath)
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '打开文件资源管理器',
+      enabled: !!vp,
+      click: async () => {
+        if (!vp) return
+        if (targetFullPath && targetExists && itemType === 'file') {
+          shell.showItemInFolder(targetFullPath)
+          return
+        }
+        await shell.openPath(targetFullPath && targetExists ? targetFullPath : vp)
       },
     },
     { type: 'separator' },
     {
       label: '删除',
+      enabled: !targetIsRoot && targetExists,
       click: () => {
-        mainWindow?.webContents.send('context-menu:delete', itemPath)
+        mainWindow?.webContents.send('context-menu:delete', targetPath)
       },
     },
   ]

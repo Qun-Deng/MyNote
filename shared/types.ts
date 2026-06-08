@@ -72,7 +72,7 @@ export interface IpcChannels {
   }
   'notes:rename': {
     args: [oldPath: string, newPath: string]
-    result: void
+    result: string
   }
 
   // Diary

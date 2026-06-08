@@ -6,6 +6,7 @@ import {
 import { ChevronLeft, ChevronRight, Clock, Plus, Trash2, FileText } from 'lucide-react'
 import { useNoteStore } from '../../stores/noteStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useVaultStore } from '../../stores/vaultStore'
 
 // ====== Time Block Parse ======
 
@@ -97,6 +98,7 @@ export default function DiaryView() {
 
   const openNote = useNoteStore((s) => s.openNote)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
+  const refreshTree = useVaultStore((s) => s.refreshTree)
 
   // Month diary dots
   useEffect(() => {
@@ -121,7 +123,10 @@ export default function DiaryView() {
     const load = async () => {
       try {
         let diary = await window.mynote.diary.get(selectedDate)
-        if (!diary) diary = await window.mynote.diary.create(selectedDate)
+        if (!diary) {
+          diary = await window.mynote.diary.create(selectedDate)
+          refreshTree()
+        }
         const result = await window.mynote.notes.read(diary.path)
         if (!cancelled) {
           if (result) {
@@ -131,6 +136,7 @@ export default function DiaryView() {
           } else {
             // File was deleted externally, recreate
             diary = await window.mynote.diary.create(selectedDate)
+            refreshTree()
             const retry = await window.mynote.notes.read(diary.path)
             if (retry) {
               setDiaryContent(retry.content)
@@ -168,6 +174,7 @@ export default function DiaryView() {
     if (!path) {
       const diary = await window.mynote.diary.create(selectedDate)
       path = diary.path
+      refreshTree()
       content = ''  // fresh diary
       setDiaryPath(path)
       setDiaryDates((prev) => new Set(prev).add(selectedDate))
@@ -212,7 +219,10 @@ export default function DiaryView() {
     setSelectedDate(ds)
     try {
       let diary = await window.mynote.diary.get(ds)
-      if (!diary) diary = await window.mynote.diary.create(ds)
+      if (!diary) {
+        diary = await window.mynote.diary.create(ds)
+        refreshTree()
+      }
       if (diary) { await openNote(diary.path); setOpenNotePath(diary.path) }
     } catch {}
   }

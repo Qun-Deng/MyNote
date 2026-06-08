@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import type { NoteMeta, TodoItem } from '../../../shared/types'
 import { useUIStore } from '../../stores/uiStore'
 import { useNoteStore } from '../../stores/noteStore'
+import { useVaultStore } from '../../stores/vaultStore'
 
 export default function Dashboard() {
   const today = new Date()
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const setActiveView = useUIStore((s) => s.setActiveView)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
   const openNote = useNoteStore((s) => s.openNote)
+  const refreshTree = useVaultStore((s) => s.refreshTree)
 
   const loadData = async () => {
     try {
@@ -45,7 +47,8 @@ export default function Dashboard() {
 
   const handleNewNote = async () => {
     try {
-      const meta = await window.mynote.notes.create('notes', `新笔记 ${format(today, 'MM-dd HH:mm')}`)
+      const meta = await window.mynote.notes.create('notes', `新笔记 ${format(today, 'MM-dd HHmm')}`)
+      refreshTree()
       await openNote(meta.path)
       setOpenNotePath(meta.path)
     } catch {}
@@ -57,6 +60,7 @@ export default function Dashboard() {
       let diary = todayDiary
       if (!diary) {
         diary = await window.mynote.diary.create(dateStr)
+        refreshTree()
       }
       if (diary) {
         await openNote(diary.path)
