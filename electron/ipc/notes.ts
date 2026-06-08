@@ -8,6 +8,17 @@ import {
   getRecentNotes,
   deleteNoteByPath,
   updateFTSIndex,
+  setNoteArchived,
+  setNotePinned,
+  batchArchiveNotes,
+  batchDeleteNotes,
+  batchAddTag,
+  renameTagInNotes,
+  deleteTagFromNotes,
+  updateLinksForNote,
+  getBacklinks,
+  getForwardLinks,
+  getNoteStats,
 } from '../db/queries'
 
 let vaultPath: string | null = null
@@ -111,6 +122,12 @@ function syncNoteToDB(filePath: string, content: string) {
     try {
       updateFTSIndex(filePath, getTitle(filePath, content), content)
     } catch {}
+    // Extract and store wikilinks
+    try {
+      const rawLinks = extractWikilinks(content)
+      const resolved = resolveWikilinkTargets(rawLinks)
+      updateLinksForNote(filePath, resolved)
+    } catch {}
   } catch {
     // DB might not be initialized yet, that's OK
   }
@@ -166,6 +183,160 @@ function extractDiaryDate(filePath: string): string | null {
   return match ? match[1] : null
 }
 
+function extractWikilinks(content: string): { target: string; context: string }[] {
+  const links: { target: string; context: string }[] = []
+  const regex = /\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    const target = match[1].trim()
+    const start = Math.max(0, match.index - 20)
+    const end = Math.min(content.length, match.index + match[0].length + 20)
+    const context = content.slice(start, end).replace(/\n/g, ' ')
+    links.push({ target, context })
+  }
+  return links
+}
+
+// ====== Tag Content Helpers ======
+
+function replaceTagInFrontmatter(content: string, oldTag: string, newTag: string): string {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fmMatch) return content
+
+  const fm = fmMatch[1]
+  let newFm = fm
+  // YAML list: tags:\n  - oldTag\n  - other
+  newFm = newFm.replace(
+    new RegExp(`(\\s*-\\s*)${escapeRegex(oldTag)}(\\s*\\n|$)`, 'g'),
+    `$1${newTag}$2`
+  )
+  // YAML array: tags: [oldTag, other] or tags: [other, oldTag]
+  newFm = newFm.replace(
+    new RegExp(`(\\[|,\\s*)${escapeRegex(oldTag)}(\\s*,|\\s*\\])`, 'g'),
+    `$1${newTag}$2`
+  )
+  // YAML single: tags: oldTag
+  newFm = newFm.replace(
+    new RegExp(`^(\\s*tags:\\s*)${escapeRegex(oldTag)}\\s*$`, 'gm'),
+    `$1${newTag}`
+  )
+
+  return content.replace(fmMatch[0], `---\n${newFm}\n---`)
+}
+
+function removeTagFromFrontmatter(content: string, tagName: string): string {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fmMatch) return content
+
+  const fm = fmMatch[1]
+  let newFm = fm
+  // YAML list item: \n  - tagName
+  newFm = newFm.replace(
+    new RegExp(`\\n\\s*-\\s*${escapeRegex(tagName)}\\s*\\n?`, 'g'),
+    '\n'
+  )
+  // YAML array: remove from [a, tagName, b] → [a, b]
+  newFm = newFm.replace(
+    new RegExp(`,\\s*${escapeRegex(tagName)}\\s*(?=,|\\])`, 'g'),
+    ''
+  )
+  newFm = newFm.replace(
+    new RegExp(`${escapeRegex(tagName)}\\s*,\\s*`, 'g'),
+    ''
+  )
+  newFm = newFm.replace(
+    new RegExp(`\\[\\s*${escapeRegex(tagName)}\\s*\\]`, 'g'),
+    '[]'
+  )
+
+  return content.replace(fmMatch[0], `---\n${newFm}\n---`)
+}
+
+function replaceInlineTag(content: string, oldTag: string, newTag: string): string {
+  // Only replace standalone #tag (not in code blocks or frontmatter)
+  const body = content.replace(/^---[\s\S]*?---/, '')
+  const fmEnd = content.indexOf(body)
+  const prefix = content.slice(0, fmEnd)
+
+  const newBody = body.replace(
+    new RegExp(`(?<=^|\\s)#${escapeRegex(oldTag)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
+    `#${newTag}`
+  )
+
+  return prefix + newBody
+}
+
+function removeInlineTag(content: string, tagName: string): string {
+  const body = content.replace(/^---[\s\S]*?---/, '')
+  const fmEnd = content.indexOf(body)
+  const prefix = content.slice(0, fmEnd)
+
+  const newBody = body.replace(
+    new RegExp(`(?<=^|\\s)#${escapeRegex(tagName)}(?=\\s|$|[.,;:!?，。；：！？])`, 'gm'),
+    ''
+  )
+
+  return prefix + newBody
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function resolveWikilinkTargets(rawLinks: { target: string; context: string }[]): { target: string; context: string }[] {
+  // Build an index of all note paths for resolution
+  const allPaths: string[] = []
+  try {
+    const notes = getAllNotes()
+    allPaths.push(...notes.map(n => n.path))
+  } catch {
+    // If DB is unavailable, scan the filesystem
+    if (vaultPath) {
+      const scan = (dir: string) => {
+        if (!fs.existsSync(dir)) return
+        for (const item of fs.readdirSync(dir)) {
+          if (item.startsWith('.')) continue
+          const fp = path.join(dir, item)
+          if (fs.statSync(fp).isDirectory()) { scan(fp) }
+          else if (item.endsWith('.md')) {
+            allPaths.push(path.relative(vaultPath!, fp).replace(/\\/g, '/'))
+          }
+        }
+      }
+      scan(vaultPath)
+    }
+  }
+
+  return rawLinks.map(link => {
+    const raw = link.target
+
+    // Strategy 1: Exact match (with or without .md)
+    if (allPaths.includes(raw)) return { ...link, target: raw }
+    if (allPaths.includes(raw + '.md')) return { ...link, target: raw + '.md' }
+
+    // Strategy 2: Case-insensitive filename match (e.g., "my note" → "notes/My Note.md")
+    const rawLower = raw.toLowerCase().replace(/\.md$/i, '')
+    const matched = allPaths.find(p => {
+      const name = p.split('/').pop()?.replace(/\.md$/i, '')?.toLowerCase()
+      return name === rawLower
+    })
+    if (matched) return { ...link, target: matched }
+
+    // Strategy 3: Partial path match (e.g., "folder/note" → "notes/folder/note.md")
+    const rawPath = raw.replace(/\\/g, '/').toLowerCase()
+    const pathMatched = allPaths.find(p => p.toLowerCase().includes(rawPath))
+    if (pathMatched) return { ...link, target: pathMatched }
+
+    // Strategy 4: Search with .md appended
+    const rawPathMd = rawPath + '.md'
+    const pathMdMatched = allPaths.find(p => p.toLowerCase().includes(rawPathMd))
+    if (pathMdMatched) return { ...link, target: pathMdMatched }
+
+    // No match found — keep the raw target (link to a note that might be created later)
+    return link
+  })
+}
+
 // ====== IPC Handlers ======
 
 export function registerNotesIPC() {
@@ -186,6 +357,8 @@ export function registerNotesIPC() {
           tags: JSON.parse(row.tags || '[]'),
           is_diary: row.is_diary === 1,
           diary_date: row.diary_date,
+          archived: row.archived === 1,
+          pinned: row.pinned === 1,
         }))
       }
     } catch {}
@@ -213,6 +386,8 @@ export function registerNotesIPC() {
             tags: extractTags(content),
             is_diary: relPath.startsWith('diary/'),
             diary_date: extractDiaryDate(relPath),
+            archived: false,
+            pinned: false,
           })
         }
       }
@@ -244,6 +419,8 @@ export function registerNotesIPC() {
           tags: JSON.parse(dbNote.tags || '[]'),
           is_diary: dbNote.is_diary === 1,
           diary_date: dbNote.diary_date,
+          archived: dbNote.archived === 1,
+          pinned: dbNote.pinned === 1,
         }
       } else {
         meta = buildMetaFromFile(filePath, content, stat)
@@ -353,6 +530,8 @@ export function registerNotesIPC() {
           tags: JSON.parse(row.tags || '[]'),
           is_diary: row.is_diary === 1,
           diary_date: row.diary_date,
+          archived: row.archived === 1,
+          pinned: row.pinned === 1,
         }))
       }
     } catch {}
@@ -383,6 +562,8 @@ export function registerNotesIPC() {
             tags: extractTags(content),
             is_diary: false,
             diary_date: null,
+            archived: false,
+            pinned: false,
           })
         }
       }
@@ -415,10 +596,118 @@ export function registerNotesIPC() {
           tags: JSON.parse(row.tags || '[]'),
           is_diary: row.is_diary === 1,
           diary_date: row.diary_date,
+          archived: row.archived === 1,
+          pinned: row.pinned === 1,
         }))
     } catch {
       return []
     }
+  })
+
+  // ====== Archive & Pin ======
+
+  ipcMain.handle('notes:set-archived', async (_event, filePath: string, archived: boolean) => {
+    setNoteArchived(filePath, archived)
+  })
+
+  ipcMain.handle('notes:set-pinned', async (_event, filePath: string, pinned: boolean) => {
+    setNotePinned(filePath, pinned)
+  })
+
+  ipcMain.handle('notes:batch-archive', async (_event, filePaths: string[], archived: boolean) => {
+    batchArchiveNotes(filePaths, archived)
+  })
+
+  ipcMain.handle('notes:batch-delete', async (_event, filePaths: string[]) => {
+    if (!vaultPath) throw new Error('Vault not initialized')
+    // Delete files from disk
+    for (const fp of filePaths) {
+      const fullPath = resolveNotePath(fp)
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath)
+      }
+    }
+    // Delete from DB
+    batchDeleteNotes(filePaths)
+  })
+
+  ipcMain.handle('notes:batch-tag', async (_event, filePaths: string[], tag: string) => {
+    batchAddTag(filePaths, tag)
+  })
+
+  // ====== Tag Management ======
+
+  ipcMain.handle('tags:rename', async (_event, oldName: string, newName: string) => {
+    if (!vaultPath) return getAllTags()
+
+    // 1. Update markdown files on disk
+    const allNotes = getAllNotes()
+    for (const note of allNotes) {
+      const tags: string[] = JSON.parse(note.tags || '[]')
+      if (!tags.includes(oldName)) continue
+
+      const fullPath = resolveNotePath(note.path)
+      if (!fs.existsSync(fullPath)) continue
+      let content = fs.readFileSync(fullPath, 'utf-8')
+
+      // Replace tag in frontmatter
+      content = replaceTagInFrontmatter(content, oldName, newName)
+      // Replace inline #tag (word boundary, not in code blocks)
+      content = replaceInlineTag(content, oldName, newName)
+
+      fs.writeFileSync(fullPath, content, 'utf-8')
+    }
+
+    // 2. Update DB
+    renameTagInNotes(oldName, newName)
+    return getAllTags()
+  })
+
+  ipcMain.handle('tags:delete', async (_event, tagName: string) => {
+    if (!vaultPath) return getAllTags()
+
+    // 1. Update markdown files on disk
+    const allNotes = getAllNotes()
+    for (const note of allNotes) {
+      const tags: string[] = JSON.parse(note.tags || '[]')
+      if (!tags.includes(tagName)) continue
+
+      const fullPath = resolveNotePath(note.path)
+      if (!fs.existsSync(fullPath)) continue
+      let content = fs.readFileSync(fullPath, 'utf-8')
+
+      // Remove tag from frontmatter
+      content = removeTagFromFrontmatter(content, tagName)
+      // Remove inline #tag
+      content = removeInlineTag(content, tagName)
+
+      fs.writeFileSync(fullPath, content, 'utf-8')
+    }
+
+    // 2. Update DB
+    deleteTagFromNotes(tagName)
+    return getAllTags()
+  })
+
+  // ====== Links & Backlinks ======
+
+  ipcMain.handle('notes:update-links', async (_event, filePath: string, links: { target: string; context: string }[]) => {
+    const resolved = resolveWikilinkTargets(links)
+    updateLinksForNote(filePath, resolved)
+  })
+
+  ipcMain.handle('notes:backlinks', async (_event, notePath: string) => {
+    return getBacklinks(notePath)
+  })
+
+  ipcMain.handle('notes:forward-links', async (_event, notePath: string) => {
+    return getForwardLinks(notePath)
+  })
+
+  // ====== Stats ======
+
+  ipcMain.handle('notes:stats', async (_event, filePath: string) => {
+    return getNoteStats(filePath)
   })
 }
 
@@ -432,5 +721,7 @@ function buildMetaFromFile(filePath: string, content: string, stat: fs.Stats) {
     tags: extractTags(content),
     is_diary: filePath.startsWith('diary/'),
     diary_date: extractDiaryDate(filePath),
+    archived: false,
+    pinned: false,
   }
 }

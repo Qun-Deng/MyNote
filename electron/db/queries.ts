@@ -9,6 +9,8 @@ export interface NoteRow {
   tags: string
   is_diary: number
   diary_date: string | null
+  archived: number
+  pinned: number
 }
 
 export interface TodoRow {
@@ -25,11 +27,21 @@ export interface TodoRow {
 
 // ====== Notes ======
 
-export function upsertNote(note: Omit<NoteRow, 'id'>): number {
+export function upsertNote(note: {
+  path: string
+  title: string
+  created_at: string
+  updated_at: string
+  tags: string
+  is_diary: number
+  diary_date: string | null
+  archived?: number
+  pinned?: number
+}): number {
   const db = getDatabase()
   const existing = db.exec('SELECT id FROM notes WHERE path = ?', [note.path])
   if (existing.length > 0 && existing[0].values.length > 0) {
-    // Update
+    // Update — preserve archived/pinned unless explicitly provided
     db.run(
       `UPDATE notes SET title=?, updated_at=?, tags=?, is_diary=?, diary_date=? WHERE path=?`,
       [note.title, note.updated_at, note.tags, note.is_diary, note.diary_date, note.path]
@@ -39,9 +51,9 @@ export function upsertNote(note: Omit<NoteRow, 'id'>): number {
   } else {
     // Insert
     db.run(
-      `INSERT INTO notes (path, title, created_at, updated_at, tags, is_diary, diary_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [note.path, note.title, note.created_at, note.updated_at, note.tags, note.is_diary, note.diary_date]
+      `INSERT INTO notes (path, title, created_at, updated_at, tags, is_diary, diary_date, archived, pinned)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [note.path, note.title, note.created_at, note.updated_at, note.tags, note.is_diary, note.diary_date, note.archived ?? 0, note.pinned ?? 0]
     )
     saveDatabase()
     const result = db.exec('SELECT last_insert_rowid()')
@@ -63,6 +75,8 @@ export function getNoteByPath(filePath: string): NoteRow | null {
     tags: row[5] as string,
     is_diary: row[6] as number,
     diary_date: row[7] as string | null,
+    archived: (row[8] ?? 0) as number,
+    pinned: (row[9] ?? 0) as number,
   }
 }
 
@@ -76,6 +90,8 @@ function rowToNote(row: any[]): NoteRow {
     tags: row[5] as string,
     is_diary: row[6] as number,
     diary_date: row[7] as string | null,
+    archived: (row[8] ?? 0) as number,
+    pinned: (row[9] ?? 0) as number,
   }
 }
 
@@ -220,5 +236,141 @@ export function updateFTSIndex(notePath: string, title: string, content: string)
     saveDatabase()
   } catch {
     // FTS might not be available
+  }
+}
+
+// ====== Archive & Pin ======
+
+export function setNoteArchived(filePath: string, archived: boolean) {
+  const db = getDatabase()
+  db.run('UPDATE notes SET archived = ? WHERE path = ?', [archived ? 1 : 0, filePath])
+  saveDatabase()
+}
+
+export function setNotePinned(filePath: string, pinned: boolean) {
+  const db = getDatabase()
+  db.run('UPDATE notes SET pinned = ? WHERE path = ?', [pinned ? 1 : 0, filePath])
+  saveDatabase()
+}
+
+export function batchArchiveNotes(filePaths: string[], archived: boolean) {
+  const db = getDatabase()
+  const placeholders = filePaths.map(() => '?').join(',')
+  db.run(`UPDATE notes SET archived = ? WHERE path IN (${placeholders})`, [archived ? 1 : 0, ...filePaths])
+  saveDatabase()
+}
+
+export function batchDeleteNotes(filePaths: string[]) {
+  const db = getDatabase()
+  const placeholders = filePaths.map(() => '?').join(',')
+  db.run(`DELETE FROM notes WHERE path IN (${placeholders})`, filePaths)
+  db.run(`DELETE FROM todos WHERE note_path IN (${placeholders})`, filePaths)
+  saveDatabase()
+}
+
+// ====== Tag Management ======
+
+export function renameTagInNotes(oldName: string, newName: string) {
+  const db = getDatabase()
+  const notes = getAllNotes()
+  for (const note of notes) {
+    const tags: string[] = JSON.parse(note.tags || '[]')
+    const idx = tags.indexOf(oldName)
+    if (idx !== -1) {
+      tags[idx] = newName
+      db.run('UPDATE notes SET tags = ? WHERE id = ?', [JSON.stringify(tags), note.id])
+    }
+  }
+  saveDatabase()
+}
+
+export function deleteTagFromNotes(tagName: string) {
+  const db = getDatabase()
+  const notes = getAllNotes()
+  for (const note of notes) {
+    const tags: string[] = JSON.parse(note.tags || '[]')
+    const filtered = tags.filter((t) => t !== tagName)
+    if (filtered.length !== tags.length) {
+      db.run('UPDATE notes SET tags = ? WHERE id = ?', [JSON.stringify(filtered), note.id])
+    }
+  }
+  saveDatabase()
+}
+
+export function batchAddTag(filePaths: string[], tag: string) {
+  const db = getDatabase()
+  for (const fp of filePaths) {
+    const note = getNoteByPath(fp)
+    if (!note) continue
+    const tags: string[] = JSON.parse(note.tags || '[]')
+    if (!tags.includes(tag)) {
+      tags.push(tag)
+      db.run('UPDATE notes SET tags = ? WHERE path = ?', [JSON.stringify(tags), fp])
+    }
+  }
+  saveDatabase()
+}
+
+// ====== Links & Backlinks ======
+
+export function updateLinksForNote(filePath: string, links: { target: string; context: string }[]) {
+  const db = getDatabase()
+  // Remove old links from this note
+  db.run('DELETE FROM links WHERE from_path = ?', [filePath])
+  // Insert new links
+  for (const link of links) {
+    db.run('INSERT INTO links (from_path, to_path, context) VALUES (?, ?, ?)',
+      [filePath, link.target, link.context])
+  }
+  saveDatabase()
+}
+
+export function getBacklinks(notePath: string): { from_path: string; context: string }[] {
+  const db = getDatabase()
+  try {
+    const result = db.exec(
+      'SELECT from_path, context FROM links WHERE to_path = ? ORDER BY from_path',
+      [notePath]
+    )
+    if (result.length === 0) return []
+    return result[0].values.map((row: any[]) => ({
+      from_path: row[0] as string,
+      context: row[1] as string,
+    }))
+  } catch {
+    return []
+  }
+}
+
+export function getForwardLinks(notePath: string): string[] {
+  const db = getDatabase()
+  try {
+    const result = db.exec(
+      'SELECT to_path FROM links WHERE from_path = ? ORDER BY to_path',
+      [notePath]
+    )
+    if (result.length === 0) return []
+    return result[0].values.map((row: any[]) => row[0] as string)
+  } catch {
+    return []
+  }
+}
+
+// ====== Stats ======
+
+export function getNoteStats(filePath: string): { wordCount: number; charCount: number } | null {
+  const db = getDatabase()
+  try {
+    const result = db.exec(
+      "SELECT LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1, LENGTH(content) FROM notes_fts WHERE title = ?",
+      [filePath]
+    )
+    if (result.length === 0 || result[0].values.length === 0) return null
+    return {
+      wordCount: result[0].values[0][0] as number,
+      charCount: result[0].values[0][1] as number,
+    }
+  } catch {
+    return null
   }
 }

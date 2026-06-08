@@ -141,6 +141,18 @@ ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
     await initDatabase(newVaultPath)
   } catch (err) {
     console.error('Failed to initialize database:', err)
+    // If the existing DB file is corrupted, remove it and retry
+    const dbPath = path.join(newVaultPath, '.mynote.db')
+    if (fs.existsSync(dbPath)) {
+      try { fs.unlinkSync(dbPath) } catch {}
+    }
+    try {
+      await initDatabase(newVaultPath)
+      console.log('Database recreated successfully')
+    } catch (err2) {
+      console.error('Failed to recreate database:', err2)
+      // Continue — file-based operations will still work, DB operations will be unavailable
+    }
   }
 })
 

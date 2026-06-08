@@ -58,6 +58,21 @@ const api = {
     recent: () => ipcRenderer.invoke('notes:recent'),
     tags: () => ipcRenderer.invoke('notes:tags'),
     byTag: (tag: string) => ipcRenderer.invoke('notes:by-tag', tag),
+    setArchived: (filePath: string, archived: boolean) => ipcRenderer.invoke('notes:set-archived', filePath, archived),
+    setPinned: (filePath: string, pinned: boolean) => ipcRenderer.invoke('notes:set-pinned', filePath, pinned),
+    batchArchive: (filePaths: string[], archived: boolean) => ipcRenderer.invoke('notes:batch-archive', filePaths, archived),
+    batchDelete: (filePaths: string[]) => ipcRenderer.invoke('notes:batch-delete', filePaths),
+    batchTag: (filePaths: string[], tag: string) => ipcRenderer.invoke('notes:batch-tag', filePaths, tag),
+    updateLinks: (filePath: string, links: { target: string; context: string }[]) => ipcRenderer.invoke('notes:update-links', filePath, links),
+    backlinks: (notePath: string) => ipcRenderer.invoke('notes:backlinks', notePath),
+    forwardLinks: (notePath: string) => ipcRenderer.invoke('notes:forward-links', notePath),
+    stats: (filePath: string) => ipcRenderer.invoke('notes:stats', filePath),
+  },
+
+  // Tags
+  tags: {
+    rename: (oldName: string, newName: string) => ipcRenderer.invoke('tags:rename', oldName, newName),
+    delete: (tagName: string) => ipcRenderer.invoke('tags:delete', tagName),
   },
 
   // Diary
@@ -103,6 +118,13 @@ const api = {
   // Export
   export: {
     pdf: (markdown: string, title: string) => ipcRenderer.invoke('export:pdf', markdown, title),
+  },
+
+  // PDF
+  pdf: {
+    read: (filePath: string) => ipcRenderer.invoke('pdf:read', filePath),
+    readAnnotations: (pdfPath: string) => ipcRenderer.invoke('pdf:read-annotations', pdfPath),
+    writeAnnotations: (pdfPath: string, data: any) => ipcRenderer.invoke('pdf:write-annotations', pdfPath, data),
   },
 }
 

@@ -1,13 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 
 export default function StatusBar() {
-  const [vaultPath, setVaultPath] = useState<string | null>(null)
   const [gitMsg, setGitMsg] = useState<string | null>(null)
-
-  useEffect(() => {
-    window.mynote.vault.getPath().then(setVaultPath)
-  }, [])
 
   const showResult = (msg: string) => {
     setGitMsg(msg)
@@ -28,31 +23,27 @@ export default function StatusBar() {
 
   return (
     <div className="statusbar">
-      <span className="truncate">{vaultPath || '未选择仓库'}</span>
+      <button
+        onClick={handlePull}
+        className="flex items-center gap-1 text-[11px] text-surface-500 hover:text-accent-600 transition-colors"
+        title="Git Pull"
+      >
+        <ArrowDown className="w-3 h-3" />
+        拉取
+      </button>
+
+      <button
+        onClick={handlePush}
+        className="flex items-center gap-1 text-[11px] text-surface-500 hover:text-accent-600 transition-colors"
+        title="Git Push"
+      >
+        <ArrowUp className="w-3 h-3" />
+        推送
+      </button>
 
       {gitMsg && (
-        <span className="text-xs text-accent-600 truncate max-w-[320px]">{gitMsg}</span>
+        <span className="text-xs text-accent-600 truncate max-w-[360px]">{gitMsg}</span>
       )}
-
-      <div className="ml-auto flex items-center gap-3">
-        <button
-          onClick={handlePull}
-          className="flex items-center gap-1 text-[11px] text-surface-500 hover:text-accent-600 transition-colors"
-          title="Git Pull"
-        >
-          <ArrowDown className="w-3 h-3" />
-          拉取
-        </button>
-        <button
-          onClick={handlePush}
-          className="flex items-center gap-1 text-[11px] text-surface-500 hover:text-accent-600 transition-colors"
-          title="Git Push"
-        >
-          <ArrowUp className="w-3 h-3" />
-          推送
-        </button>
-        <span>MyNote v0.1.0</span>
-      </div>
     </div>
   )
 }
