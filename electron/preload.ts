@@ -126,6 +126,11 @@ const api = {
     readAnnotations: (pdfPath: string) => ipcRenderer.invoke('pdf:read-annotations', pdfPath),
     writeAnnotations: (pdfPath: string, data: any) => ipcRenderer.invoke('pdf:write-annotations', pdfPath, data),
   },
+
+  // Assets (images, etc.)
+  assets: {
+    saveImage: (buffer: ArrayBuffer, filename: string) => ipcRenderer.invoke('assets:save-image', buffer, filename),
+  },
 }
 
 contextBridge.exposeInMainWorld('mynote', api)
