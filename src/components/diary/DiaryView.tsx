@@ -56,18 +56,56 @@ function timeToMin(t: string) { const [h, m] = t.split(':').map(Number); return 
 function fmtRange(s: string, e: string | null) { return e ? `${s} - ${e}` : s }
 
 function insertBlockIntoContent(content: string, blockLine: string): string {
-  const re = /##\s*\[今日记录\]\s*\n/
-  const m = content.match(re)
-  if (m) {
-    const idx = m.index! + m[0].length
+  // 1. Try to find existing ## [今日记录] header
+  const headerRe = /^##\s*\[今日记录\]/m
+  const headerMatch = content.match(headerRe)
+  if (headerMatch) {
+    // Found — insert time block on the next line after this header
+    const lineEnd = content.indexOf('\n', headerMatch.index!)
+    const idx = lineEnd === -1 ? content.length : lineEnd + 1
     return content.slice(0, idx) + `${blockLine}\n` + content.slice(idx)
   }
+
+  // 2. No [今日记录] — try to find the title (# ...) and insert after it
+  const titleMatch = content.match(/^#\s+.+$/m)
+  if (titleMatch) {
+    const titleLineEnd = content.indexOf('\n', titleMatch.index!)
+    let idx = titleLineEnd === -1 ? content.length : titleLineEnd + 1
+    // Skip one blank line after title if present
+    if (content[idx] === '\n') idx++
+    return content.slice(0, idx) + `\n## [今日记录]\n${blockLine}\n` + content.slice(idx)
+  }
+
+  // 3. No title either — try to insert after frontmatter
   const fmEnd = content.indexOf('---\n', 3)
   if (fmEnd > -1) {
     const insertAt = content.indexOf('\n', fmEnd + 4)
     return content.slice(0, insertAt + 1) + `\n## [今日记录]\n${blockLine}\n` + content.slice(insertAt + 1)
   }
+
+  // 4. No structure at all — just append
   return content + `\n${blockLine}\n`
+}
+
+function buildDiaryTemplate(date: string): string {
+  const d = new Date(date)
+  const dateStr = format(d, 'yyyy年M月d日')
+  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  const weekday = weekdays[d.getDay()]
+  const isoDate = format(d, 'yyyy-MM-dd')
+  return `---
+date: ${isoDate}
+tags: [diary]
+---
+
+# ${dateStr} ${weekday}
+
+## [今日记录]
+
+## [待办事项]
+
+## [想法记录]
+`
 }
 
 // ====== Const ======
@@ -175,7 +213,9 @@ export default function DiaryView() {
       const diary = await window.mynote.diary.create(selectedDate)
       path = diary.path
       refreshTree()
-      content = ''  // fresh diary
+      // Read the actual template content; fall back to building it ourselves
+      const result = await window.mynote.notes.read(diary.path)
+      content = result?.content || buildDiaryTemplate(selectedDate)
       setDiaryPath(path)
       setDiaryDates((prev) => new Set(prev).add(selectedDate))
     }
