@@ -9,6 +9,33 @@ import { initDatabase } from './db/connection'
 
 let mainWindow: BrowserWindow | null = null
 
+// ====== Config Persistence ======
+
+const configPath = path.join(app.getPath('userData'), 'config.json')
+
+function loadConfig(): { vaultPath?: string } {
+  try {
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    }
+  } catch {}
+  return {}
+}
+
+function saveConfig(config: { vaultPath?: string }) {
+  const dir = path.dirname(configPath)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+}
+
+function getSavedVaultPath(): string | null {
+  const config = loadConfig()
+  if (config.vaultPath && fs.existsSync(config.vaultPath)) {
+    return config.vaultPath
+  }
+  return null
+}
+
 // The built directory structure
 //
 // ├─┬ dist-electron
@@ -82,6 +109,7 @@ ipcMain.handle('vault:select', async () => {
   })
   if (!result.canceled && result.filePaths.length > 0) {
     setVaultPath(result.filePaths[0])
+    saveConfig({ vaultPath: result.filePaths[0] })
     return result.filePaths[0]
   }
   return null
@@ -91,8 +119,13 @@ ipcMain.handle('vault:get-path', () => {
   return getVaultPath()
 })
 
+ipcMain.handle('vault:get-saved-path', () => {
+  return getSavedVaultPath()
+})
+
 ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
   setVaultPath(newVaultPath)
+  saveConfig({ vaultPath: newVaultPath })
   // Create basic directory structure
   const dirs = ['notes', 'diary', 'assets']
   for (const dir of dirs) {
@@ -121,6 +154,63 @@ ipcMain.handle('vault:move', async (_event, from: string, to: string) => {
     }
     fs.renameSync(fromFull, toFull)
   }
+})
+
+ipcMain.handle('vault:create-folder', async (_event, folderPath: string) => {
+  const vp = getVaultPath()
+  if (!vp) throw new Error('Vault not initialized')
+  const fullPath = path.join(vp, folderPath)
+  if (!fs.existsSync(fullPath)) {
+    fs.mkdirSync(fullPath, { recursive: true })
+  }
+})
+
+ipcMain.handle('vault:delete-item', async (_event, itemPath: string) => {
+  const vp = getVaultPath()
+  if (!vp) throw new Error('Vault not initialized')
+  const fullPath = path.join(vp, itemPath)
+  if (fs.existsSync(fullPath)) {
+    const stat = fs.statSync(fullPath)
+    if (stat.isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true })
+    } else {
+      fs.unlinkSync(fullPath)
+    }
+  }
+})
+
+ipcMain.handle('vault:show-context-menu', async (_event, itemPath: string, itemType: 'file' | 'directory') => {
+  const { Menu } = require('electron')
+  const template: any[] = [
+    {
+      label: '新建笔记',
+      click: () => {
+        mainWindow?.webContents.send('context-menu:new-note', itemType === 'directory' ? itemPath : path.dirname(itemPath))
+      },
+    },
+    {
+      label: '新建文件夹',
+      click: () => {
+        mainWindow?.webContents.send('context-menu:new-folder', itemType === 'directory' ? itemPath : path.dirname(itemPath))
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '重命名',
+      click: () => {
+        mainWindow?.webContents.send('context-menu:rename', itemPath)
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '删除',
+      click: () => {
+        mainWindow?.webContents.send('context-menu:delete', itemPath)
+      },
+    },
+  ]
+  const menu = Menu.buildFromTemplate(template)
+  menu.popup()
 })
 
 // ====== Register IPC Handlers ======

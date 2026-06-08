@@ -21,9 +21,30 @@ const api = {
   vault: {
     select: () => ipcRenderer.invoke('vault:select'),
     getPath: () => ipcRenderer.invoke('vault:get-path'),
+    getSavedPath: () => ipcRenderer.invoke('vault:get-saved-path'),
     init: (vaultPath: string) => ipcRenderer.invoke('vault:init', vaultPath),
     tree: () => ipcRenderer.invoke('vault:tree'),
     move: (from: string, to: string) => ipcRenderer.invoke('vault:move', from, to),
+    createFolder: (folderPath: string) => ipcRenderer.invoke('vault:create-folder', folderPath),
+    deleteItem: (itemPath: string) => ipcRenderer.invoke('vault:delete-item', itemPath),
+    showContextMenu: (itemPath: string, itemType: 'file' | 'directory') =>
+      ipcRenderer.invoke('vault:show-context-menu', itemPath, itemType),
+    onContextMenuAction: (callback: (action: string, targetPath: string) => void) => {
+      const handlers: { [key: string]: (_event: any, p: string) => void } = {
+        'context-menu:new-note': (_e, p) => callback('new-note', p),
+        'context-menu:new-folder': (_e, p) => callback('new-folder', p),
+        'context-menu:rename': (_e, p) => callback('rename', p),
+        'context-menu:delete': (_e, p) => callback('delete', p),
+      }
+      Object.entries(handlers).forEach(([channel, handler]) => {
+        ipcRenderer.on(channel, handler)
+      })
+      return () => {
+        Object.entries(handlers).forEach(([channel, handler]) => {
+          ipcRenderer.removeListener(channel, handler)
+        })
+      }
+    },
   },
 
   // Notes

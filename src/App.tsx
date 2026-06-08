@@ -35,13 +35,19 @@ function App() {
   useEffect(() => {
     async function checkVault() {
       try {
-        const path = await window.mynote.vault.getPath()
+        // 1. Try current session vault path
+        let path = await window.mynote.vault.getPath()
+        // 2. Try saved path from previous session
+        if (!path) {
+          path = await window.mynote.vault.getSavedPath()
+        }
         if (path) {
+          await window.mynote.vault.init(path)
           setVaultPath(path)
           setVaultReady(true)
         }
       } catch {
-        // No vault selected
+        // No vault available
       } finally {
         setLoading(false)
       }
