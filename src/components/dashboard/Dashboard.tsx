@@ -1,7 +1,7 @@
-import { CalendarDays, CheckSquare, FileText, Plus, Clock, Trash2, Check, Square } from 'lucide-react'
+import { CalendarDays, CheckSquare, FileText, Plus, Clock, Trash2, Check, Square, Image } from 'lucide-react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import type { NoteMeta } from '../../../shared/types'
 import { useUIStore } from '../../stores/uiStore'
 import { useNoteStore } from '../../stores/noteStore'
@@ -16,10 +16,66 @@ interface TodoPageItem {
   created_at: string
 }
 
+// ── Banner persistence ──
+
+const BANNER_KEY = 'dashboard_banner'
+
+interface BannerData {
+  quote: string
+  author: string
+  image: string | null  // base64 data URL
+}
+
+function loadBanner(): BannerData {
+  try {
+    const raw = localStorage.getItem(BANNER_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { quote: '千里之行，始于足下。', author: '老子', image: null }
+}
+
+function saveBanner(data: BannerData) {
+  localStorage.setItem(BANNER_KEY, JSON.stringify(data))
+}
+
 export default function Dashboard() {
   const today = new Date()
   const greeting = getGreeting(today.getHours())
   const dateStr = format(today, 'yyyy年M月d日 EEEE', { locale: zhCN })
+  const [banner, setBanner] = useState<BannerData>(loadBanner)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImagePick = useCallback(() => {
+    const input = fileInputRef.current
+    if (!input) return
+    input.click()
+  }, [])
+
+  const handleImageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const next = { ...banner, image: reader.result as string }
+      setBanner(next)
+      saveBanner(next)
+    }
+    reader.readAsDataURL(file)
+    // Reset so same file can be re-selected
+    e.target.value = ''
+  }, [banner])
+
+  const handleQuoteChange = useCallback((value: string) => {
+    const next = { ...banner, quote: value }
+    setBanner(next)
+    saveBanner(next)
+  }, [banner])
+
+  const handleAuthorChange = useCallback((value: string) => {
+    const next = { ...banner, author: value }
+    setBanner(next)
+    saveBanner(next)
+  }, [banner])
 
   const [recentNotes, setRecentNotes] = useState<NoteMeta[]>([])
   const [todoItems, setTodoItems] = useState<TodoPageItem[]>([])
@@ -121,11 +177,75 @@ export default function Dashboard() {
     <div className="h-full overflow-auto">
       <div className="max-w-4xl mx-auto p-8">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="text-2xl font-bold text-surface-900">
             {greeting}
           </h1>
           <p className="text-surface-500 mt-1">{dateStr}</p>
+        </div>
+
+        {/* Editable Banner */}
+        <div
+          className="mb-8 rounded-2xl p-8 relative overflow-hidden shadow-md min-h-[180px] flex flex-col justify-center"
+          style={{
+            backgroundImage: banner.image
+              ? `url(${banner.image})`
+              : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        >
+          {/* Dark overlay for readability when image is set */}
+          {banner.image && (
+            <div className="absolute inset-0 bg-black/35 rounded-2xl" />
+          )}
+
+          <div className="relative z-10">
+            {/* Quote — editable */}
+            <input
+              type="text"
+              value={banner.quote}
+              onChange={(e) => handleQuoteChange(e.target.value)}
+              placeholder="写下激励你的话…"
+              className="w-full bg-transparent text-white text-2xl font-serif tracking-wide leading-relaxed placeholder:text-white/30 border-none outline-none"
+              style={{
+                fontFamily: '"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, "Times New Roman", serif',
+                textShadow: banner.image ? '0 1px 8px rgba(0,0,0,0.4)' : '0 1px 4px rgba(0,0,0,0.15)',
+              }}
+            />
+            {/* Author — editable */}
+            <input
+              type="text"
+              value={banner.author}
+              onChange={(e) => handleAuthorChange(e.target.value)}
+              placeholder="— 署名"
+              className="w-full bg-transparent text-white/70 text-sm mt-3 tracking-wider placeholder:text-white/25 border-none outline-none"
+              style={{
+                fontFamily: '"Inter", "Noto Sans CJK SC", system-ui, sans-serif',
+                textShadow: banner.image ? '0 1px 6px rgba(0,0,0,0.35)' : '0 1px 2px rgba(0,0,0,0.1)',
+                letterSpacing: '0.08em',
+              }}
+            />
+          </div>
+
+          {/* Image picker — bottom right */}
+          <div className="absolute right-4 bottom-4 z-10">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageChange}
+            />
+            <button
+              onClick={handleImagePick}
+              className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white/80 bg-white/10 hover:bg-white/20 backdrop-blur px-2.5 py-1.5 rounded-lg transition-all"
+              title="选择背景图片"
+            >
+              <Image className="w-3.5 h-3.5" />
+              图片
+            </button>
+          </div>
         </div>
 
         {/* Quick Actions */}
@@ -153,12 +273,12 @@ export default function Dashboard() {
         {/* Recent Notes */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="card-title">最近笔记</h2>
+            <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">最近笔记</h2>
             <button
               onClick={() => setActiveView('knowledge')}
-              className="text-xs text-accent-600 hover:text-accent-700 font-medium"
+              className="text-xs text-accent-600 hover:text-accent-700 font-medium transition-colors"
             >
-              查看全部
+              查看全部 →
             </button>
           </div>
           {recentNotes.length === 0 ? (
@@ -178,12 +298,14 @@ export default function Dashboard() {
                 <button
                   key={note.path}
                   onClick={() => handleOpenNote(note.path)}
-                  className="card text-left hover:border-accent-200 transition-colors"
+                  className="card text-left hover:border-accent-200 hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
                 >
                   <div className="flex items-start gap-3">
-                    <FileText className="w-4 h-4 text-surface-400 mt-0.5 flex-shrink-0" />
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-medium text-surface-800 truncate">
+                    <div className="w-8 h-8 rounded-lg bg-accent-50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <FileText className="w-4 h-4 text-accent-500" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-semibold text-surface-800 truncate">
                         {note.title}
                       </h3>
                       <p className="text-xs text-surface-400 mt-1 flex items-center gap-1">
@@ -191,7 +313,7 @@ export default function Dashboard() {
                         {format(new Date(note.updated_at), 'MM-dd HH:mm')}
                       </p>
                       {note.tags.length > 0 && (
-                        <div className="flex gap-1 mt-2">
+                        <div className="flex gap-1 mt-2 flex-wrap">
                           {note.tags.map((tag) => (
                             <span key={tag} className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
                               {tag}
@@ -210,46 +332,49 @@ export default function Dashboard() {
         {/* Today + Todos row */}
         <div className="grid grid-cols-2 gap-6">
           {/* Today's Diary */}
-          <section className="card">
+          <section className="card hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="card-title">今日日记</h2>
+              <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">今日日记</h2>
               <button
                 onClick={handleTodayDiary}
-                className="p-1 hover:bg-surface-100 rounded transition-colors"
+                className="p-1.5 hover:bg-amber-50 rounded-lg transition-colors"
               >
-                <Plus className="w-4 h-4 text-surface-400" />
+                <Plus className="w-4 h-4 text-surface-400 hover:text-amber-500 transition-colors" />
               </button>
             </div>
             {todayDiary ? (
               <button
                 onClick={handleTodayDiary}
-                className="w-full text-left flex items-center gap-3 p-2 hover:bg-surface-50 rounded-md transition-colors"
+                className="w-full text-left flex items-center gap-3 p-3 hover:bg-amber-50/50 rounded-lg transition-colors"
               >
-                <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
-                  <CalendarDays className="w-5 h-5 text-amber-500" />
+                <div className="w-11 h-11 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <CalendarDays className="w-5 h-5 text-amber-600" />
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-surface-700">{todayDiary.title}</p>
-                  <p className="text-xs text-surface-400 mt-0.5">点击编辑今日日记</p>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-surface-800 truncate">{todayDiary.title}</p>
+                  <p className="text-xs text-surface-400 mt-0.5">点击编辑</p>
                 </div>
               </button>
             ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
+              <div
+                onClick={handleTodayDiary}
+                className="flex items-center gap-3 p-3 rounded-lg border-2 border-dashed border-surface-200 hover:border-amber-200 hover:bg-amber-50/30 cursor-pointer transition-all"
+              >
+                <div className="w-11 h-11 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
                   <CalendarDays className="w-5 h-5 text-amber-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-surface-700">还没有今日日记</p>
-                  <p className="text-xs text-surface-400 mt-0.5">点击右上角 + 开始写作</p>
+                  <p className="text-sm font-medium text-surface-600">开始今日日记</p>
+                  <p className="text-xs text-surface-400 mt-0.5">记录今天的想法</p>
                 </div>
               </div>
             )}
           </section>
 
           {/* Today's Todos */}
-          <section className="card">
+          <section className="card hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="card-title">今日待办</h2>
+              <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">今日待办</h2>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-surface-400">
                   {todoItems.length} 条
@@ -392,18 +517,30 @@ function QuickCard({
   color: 'accent' | 'green' | 'amber'
   onClick: () => void
 }) {
-  const colorClasses = {
-    accent: 'bg-accent-50 text-accent-600 hover:bg-accent-100 border-accent-200',
-    green: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200',
-    amber: 'bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-200',
+  const styles = {
+    accent: {
+      card: 'bg-accent-50/60 text-accent-700 hover:bg-accent-100 hover:shadow-md border-accent-200/60',
+      iconBg: 'bg-accent-100 text-accent-600',
+    },
+    green: {
+      card: 'bg-emerald-50/60 text-emerald-700 hover:bg-emerald-100 hover:shadow-md border-emerald-200/60',
+      iconBg: 'bg-emerald-100 text-emerald-600',
+    },
+    amber: {
+      card: 'bg-amber-50/60 text-amber-700 hover:bg-amber-100 hover:shadow-md border-amber-200/60',
+      iconBg: 'bg-amber-100 text-amber-600',
+    },
   }
+  const s = styles[color]
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${colorClasses[color]}`}
+      className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${s.card}`}
     >
-      {icon}
-      <span className="text-sm font-medium">{label}</span>
+      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${s.iconBg}`}>
+        {icon}
+      </div>
+      <span className="text-sm font-semibold">{label}</span>
     </button>
   )
 }
