@@ -107,6 +107,146 @@
   }
 }
 
+/* ====== Dark Theme ====== */
+[data-theme="dark"] {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --border-color: #334155;
+  --accent-bg: #1e3a5f;
+  --accent-text: #60a5fa;
+  --hover-bg: #1e293b;
+}
+
+[data-theme="dark"] body {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .sidebar {
+  background-color: #0f172a;
+  border-color: #1e293b;
+}
+
+[data-theme="dark"] .content-area {
+  background-color: #1e293b;
+}
+
+[data-theme="dark"] .titlebar {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .statusbar {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #64748b;
+}
+
+[data-theme="dark"] .card {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .card:hover {
+  border-color: #475569;
+}
+
+[data-theme="dark"] .card-title {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .nav-item {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .nav-item:hover {
+  background-color: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .nav-item.active {
+  background-color: #1e3a5f;
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .calendar-day {
+  background-color: #1e293b;
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .calendar-day:hover {
+  background-color: #1e3a5f;
+}
+
+[data-theme="dark"] .calendar-day-header {
+  background-color: #334155;
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .calendar-day.today {
+  background-color: #1e3a5f;
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .calendar-grid {
+  background-color: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .milkdown-editor-container h1 {
+  border-color: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container code {
+  background: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container pre {
+  background: #0f172a;
+}
+
+[data-theme="dark"] .milkdown-editor-container blockquote {
+  border-color: #3b82f6;
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .milkdown-editor-container th {
+  background: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container th,
+[data-theme="dark"] .milkdown-editor-container td {
+  border-color: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container hr {
+  border-color: #334155;
+}
+
+[data-theme="dark"] .milkdown-editor-container li[data-checked="true"] {
+  color: #64748b;
+}
+
+[data-theme="dark"] .milkdown-editor-container del,
+[data-theme="dark"] .milkdown-editor-container s {
+  color: #64748b;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background-color: #475569;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+
 /* ====== Calendar ====== */
 @layer components {
   .calendar-grid {

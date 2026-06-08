@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "description": "A beautiful markdown note-taking application",
   "main": "dist-electron/main.js",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "electron:dev": "vite",
-    "electron:build": "vite build && electron-builder"
+    "dist": "vite build && electron-builder",
+    "dist:win": "vite build && electron-builder --win",
+    "dist:mac": "vite build && electron-builder --mac",
+    "dist:linux": "vite build && electron-builder --linux"
   },
   "dependencies": {
     "@milkdown/kit": "^7.21.2",

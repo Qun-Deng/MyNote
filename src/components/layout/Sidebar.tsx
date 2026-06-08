@@ -11,10 +11,13 @@ import {
   ChevronDown,
   Folder,
   Trash2,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { useUIStore, type ActiveView } from '../../stores/uiStore'
 import { useVaultStore } from '../../stores/vaultStore'
 import { useNoteStore } from '../../stores/noteStore'
+import { useThemeStore } from '../../stores/themeStore'
 import { useEffect, useState } from 'react'
 import type { FileTreeNode } from '../../../shared/types'
 
@@ -37,6 +40,9 @@ export default function Sidebar() {
   const createNote = useVaultStore((s) => s.createNote)
   const deleteNote = useVaultStore((s) => s.deleteNote)
   const vaultPath = useVaultStore((s) => s.vaultPath)
+
+  const theme = useThemeStore((s) => s.theme)
+  const toggleTheme = useThemeStore((s) => s.toggleTheme)
 
   const openNote = useNoteStore((s) => s.openNote)
 
@@ -124,6 +130,27 @@ export default function Sidebar() {
             onDelete={handleDeleteNote}
           />
         )}
+      </div>
+
+      {/* Theme Toggle */}
+      <div className="px-3 pb-3 border-t border-surface-200 pt-2">
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-surface-500
+                     hover:bg-surface-100 rounded transition-colors"
+        >
+          {theme === 'light' ? (
+            <>
+              <Moon className="w-3.5 h-3.5" />
+              暗色模式
+            </>
+          ) : (
+            <>
+              <Sun className="w-3.5 h-3.5" />
+              亮色模式
+            </>
+          )}
+        </button>
       </div>
     </div>
   )
