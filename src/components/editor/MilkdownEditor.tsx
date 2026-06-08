@@ -16,6 +16,39 @@ interface MilkdownEditorProps {
   readOnly?: boolean
 }
 
+function splitFrontmatter(markdown: string) {
+  const standardFrontmatter = markdown.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/)
+  if (standardFrontmatter) {
+    return {
+      frontmatter: standardFrontmatter[0].replace(/\r?\n$/, ''),
+      body: markdown.slice(standardFrontmatter[0].length),
+    }
+  }
+
+  const diaryMetaLine = markdown.match(
+    /^(?:[ \t]*\r?\n)*\[?(?:#{1,6}\s*)?date:\s*(\d{4}-\d{2}-\d{2})\s+tags:\s*(\\?\[[^\]\r\n]*\\?\])[ \t]*\]?(?:\r?\n|$)/,
+  )
+  if (diaryMetaLine) {
+    const tags = diaryMetaLine[2].replace(/\\/g, '')
+    const body = markdown
+      .slice(diaryMetaLine[0].length)
+      .replace(/^---[ \t]*(?:\r?\n|$)/, '')
+
+    return {
+      frontmatter: `---\ndate: ${diaryMetaLine[1]}\ntags: ${tags}\n---`,
+      body,
+    }
+  }
+
+  return { frontmatter: '', body: markdown }
+}
+
+function mergeFrontmatter(frontmatter: string, body: string) {
+  if (!frontmatter) return body
+  if (!body.trim()) return `${frontmatter}\n`
+  return `${frontmatter}\n\n${body.replace(/^\r?\n/, '')}`
+}
+
 function configureEditor(container: HTMLDivElement, initialContent: string) {
   return (ctx: Ctx) => {
     ctx.set(rootCtx, container)
@@ -28,17 +61,20 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const initialized = useRef(false)
+  const frontmatterRef = useRef('')
 
   // Initialize editor once per mount (key changes trigger remount)
   useEffect(() => {
     const container = containerRef.current
     if (!container || initialized.current) return
     initialized.current = true
+    const { frontmatter, body } = splitFrontmatter(content)
+    frontmatterRef.current = frontmatter
 
     let editor: Editor
 
     Editor.make()
-      .use(configureEditor(container, content))
+      .use(configureEditor(container, body))
       .use(commonmark)
       .use(gfm)
       .use(history)
@@ -54,7 +90,7 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
         // Register markdown change listener
         const listenerManager = editor.ctx.get(listenerCtx)
         listenerManager.markdownUpdated((_ctx, markdown) => {
-          onContentChange(markdown)
+          onContentChange(mergeFrontmatter(frontmatterRef.current, markdown))
         })
       })
 
@@ -71,7 +107,6 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
     <div
       ref={containerRef}
       className="milkdown-editor-container"
-      style={{ padding: '2rem 3rem', maxWidth: '800px', margin: '0 auto', height: '100%' }}
       data-readonly={readOnly}
     />
   )

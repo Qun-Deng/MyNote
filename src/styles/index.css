@@ -196,49 +196,6 @@
   background-color: #334155;
 }
 
-[data-theme="dark"] .milkdown-editor-container {
-  color: #e2e8f0;
-}
-
-[data-theme="dark"] .milkdown-editor-container h1 {
-  border-color: #334155;
-}
-
-[data-theme="dark"] .milkdown-editor-container code {
-  background: #334155;
-}
-
-[data-theme="dark"] .milkdown-editor-container pre {
-  background: #0f172a;
-}
-
-[data-theme="dark"] .milkdown-editor-container blockquote {
-  border-color: #3b82f6;
-  color: #94a3b8;
-}
-
-[data-theme="dark"] .milkdown-editor-container th {
-  background: #334155;
-}
-
-[data-theme="dark"] .milkdown-editor-container th,
-[data-theme="dark"] .milkdown-editor-container td {
-  border-color: #334155;
-}
-
-[data-theme="dark"] .milkdown-editor-container hr {
-  border-color: #334155;
-}
-
-[data-theme="dark"] .milkdown-editor-container li[data-checked="true"] {
-  color: #64748b;
-}
-
-[data-theme="dark"] .milkdown-editor-container del,
-[data-theme="dark"] .milkdown-editor-container s {
-  color: #64748b;
-}
-
 [data-theme="dark"] ::-webkit-scrollbar-thumb {
   background-color: #475569;
 }
