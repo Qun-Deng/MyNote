@@ -60,10 +60,10 @@ function insertBlockIntoContent(content: string, blockLine: string): string {
   const re = /^##\s*\[今日记录\][^\n]*/m
   const m = content.match(re)
   if (m) {
-    // Insert on a new line right after the header line
-    const idx = m.index! + m[0].length
-    const hasTrailingNewline = content[idx] === '\n'
-    return content.slice(0, idx) + (hasTrailingNewline ? '' : '\n') + `${blockLine}\n` + content.slice(idx)
+    // Find the end of the header line (after its newline) and insert the block on the next line
+    const lineEnd = content.indexOf('\n', m.index!)
+    const idx = lineEnd === -1 ? content.length : lineEnd + 1
+    return content.slice(0, idx) + `${blockLine}\n` + content.slice(idx)
   }
   const fmEnd = content.indexOf('---\n', 3)
   if (fmEnd > -1) {
