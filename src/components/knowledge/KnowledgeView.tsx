@@ -137,9 +137,15 @@ export default function KnowledgeView() {
             )}
           </div>
           {allTags.length === 0 ? (
-            <p className="text-xs text-surface-400">
-              在笔记中使用 <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">#标签</code> 或 frontmatter <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">tags: [...]</code>
-            </p>
+            <div className="text-xs text-surface-400 space-y-1.5">
+              <p>在笔记中使用以下方式添加标签：</p>
+              <p>
+                📝 正文中: <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">#标签名</code>
+              </p>
+              <p>
+                📄 Frontmatter: <code className="bg-surface-100 px-1 py-0.5 rounded text-[10px]">tags: [标签1, 标签2]</code>
+              </p>
+            </div>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {allTags.map((tag) => (
