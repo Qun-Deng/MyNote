@@ -92,6 +92,18 @@ const api = {
     query: (query: string) => ipcRenderer.invoke('search:query', query),
     reindex: () => ipcRenderer.invoke('search:reindex'),
   },
+
+  // Git
+  git: {
+    status: () => ipcRenderer.invoke('git:status'),
+    pull: () => ipcRenderer.invoke('git:pull'),
+    push: () => ipcRenderer.invoke('git:push'),
+  },
+
+  // Export
+  export: {
+    pdf: (markdown: string, title: string) => ipcRenderer.invoke('export:pdf', markdown, title),
+  },
 }
 
 contextBridge.exposeInMainWorld('mynote', api)
