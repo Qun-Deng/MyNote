@@ -7,6 +7,7 @@ import { registerTodosIPC } from './ipc/todos'
 import { registerSearchIPC } from './ipc/search'
 import { registerGitIPC } from './ipc/git'
 import { registerExportIPC } from './ipc/export'
+import { registerAssetsIPC, setVaultPath as setAssetsVaultPath } from './ipc/assets'
 import { initDatabase } from './db/connection'
 
 let mainWindow: BrowserWindow | null = null
@@ -111,6 +112,7 @@ ipcMain.handle('vault:select', async () => {
   })
   if (!result.canceled && result.filePaths.length > 0) {
     setVaultPath(result.filePaths[0])
+    setAssetsVaultPath(result.filePaths[0])
     saveConfig({ vaultPath: result.filePaths[0] })
     return result.filePaths[0]
   }
@@ -127,6 +129,7 @@ ipcMain.handle('vault:get-saved-path', () => {
 
 ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
   setVaultPath(newVaultPath)
+  setAssetsVaultPath(newVaultPath)
   saveConfig({ vaultPath: newVaultPath })
   // Create basic directory structure
   const dirs = ['notes', 'diary', 'assets']
@@ -258,6 +261,7 @@ registerTodosIPC()
 registerSearchIPC()
 registerGitIPC()
 registerExportIPC()
+registerAssetsIPC()
 
 // ====== App Lifecycle ======
 

@@ -574,6 +574,75 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, r
         listenerManager.markdownUpdated((_ctx, markdown) => {
           onContentChange(mergeFrontmatter(frontmatterRef.current, markdown))
         })
+
+        // ── Image paste handler ──
+        const view = editor.ctx.get(editorViewCtx)
+        const pmDom = view.dom
+
+        const handleImagePaste = async (e: ClipboardEvent) => {
+          const items = e.clipboardData?.items
+          if (!items) return
+
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i]
+            if (item.type.startsWith('image/')) {
+              e.preventDefault()
+              e.stopPropagation()
+              const blob = item.getAsFile()
+              if (!blob) continue
+              try {
+                const buffer = await blob.arrayBuffer()
+                const filename = `pasted-${Date.now()}.${blob.type.split('/')[1] || 'png'}`
+                const relPath = await window.mynote.assets.saveImage(buffer, filename)
+                const { state, dispatch } = view
+                const tr = state.tr.insertText(`![](${relPath})`, state.selection.from)
+                dispatch(tr.scrollIntoView())
+                view.focus()
+              } catch (err) {
+                console.error('Failed to save pasted image:', err)
+              }
+              break
+            }
+          }
+        }
+
+        const handleImageDrop = async (e: DragEvent) => {
+          const files = e.dataTransfer?.files
+          if (!files || files.length === 0) return
+          let handled = false
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i]
+            if (file.type.startsWith('image/')) {
+              if (!handled) {
+                e.preventDefault()
+                e.stopPropagation()
+                handled = true
+              }
+              try {
+                const buffer = await file.arrayBuffer()
+                const relPath = await window.mynote.assets.saveImage(buffer, file.name)
+                // Insert at drop position
+                const dropPos = view.posAtCoords({ left: e.clientX, top: e.clientY })
+                const pos = dropPos?.pos ?? view.state.selection.from
+                const { state, dispatch } = view
+                const tr = state.tr.insertText(`![](${relPath})\n`, pos)
+                dispatch(tr.scrollIntoView())
+                view.focus()
+              } catch (err) {
+                console.error('Failed to save dropped image:', err)
+              }
+            }
+          }
+        }
+
+        pmDom.addEventListener('paste', handleImagePaste)
+        pmDom.addEventListener('dragover', (e) => {
+          if (e.dataTransfer?.types.includes('Files')) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+          }
+        })
+        pmDom.addEventListener('drop', handleImageDrop)
       })
       .catch((err) => {
         console.error('Failed to create Milkdown editor:', err)
