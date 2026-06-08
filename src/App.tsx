@@ -62,6 +62,7 @@ function App() {
   const updateCurrentMeta = useNoteStore((s) => s.updateCurrentMeta)
   const saveNote = useNoteStore((s) => s.saveNote)
   const closeNote = useNoteStore((s) => s.closeNote)
+  const openNote = useNoteStore((s) => s.openNote)
 
   const vaultPath = useVaultStore((s) => s.vaultPath)
   const setVaultPath = useVaultStore((s) => s.setVaultPath)
@@ -264,6 +265,39 @@ function App() {
                   key={`${currentMeta.path}:${editorRevision}`}
                   content={currentContent}
                   onContentChange={(markdown) => setContent(markdown)}
+                  onNavigate={async (pageName: string) => {
+                    try {
+                      // Resolve the page name to a file path
+                      const allNotes = await window.mynote.notes.list()
+                      const name = pageName.toLowerCase().replace(/\.md$/i, '')
+                      const exact = allNotes.find((n: any) =>
+                        n.path.toLowerCase() === pageName ||
+                        n.path.toLowerCase() === pageName + '.md'
+                      )
+                      const byName = allNotes.find((n: any) => {
+                        const fname = n.path.split('/').pop()?.replace(/\.md$/i, '')?.toLowerCase()
+                        return fname === name
+                      })
+                      const target = exact || byName
+                      if (target) {
+                        // Save current note first
+                        await saveNote()
+                        // Open the target note
+                        await openNote(target.path)
+                        setOpenNotePath(target.path)
+                      } else {
+                        // Note doesn't exist yet — create it
+                        const newNote = await window.mynote.notes.create('notes', pageName)
+                        if (newNote) {
+                          await saveNote()
+                          await openNote(newNote.path)
+                          setOpenNotePath(newNote.path)
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Failed to navigate wikilink:', err)
+                    }
+                  }}
                 />
               </div>
             </div>

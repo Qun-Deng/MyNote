@@ -5,23 +5,70 @@ import fs from 'fs'
 let db: Database | null = null
 let dbPath: string | null = null
 
+function resolveWasmPath(): string | null {
+  const candidates: string[] = []
+
+  // Strategy 1: resolve from sql.js package location (most reliable)
+  try {
+    const sqljsDir = path.dirname(require.resolve('sql.js/package.json'))
+    candidates.push(path.join(sqljsDir, 'dist', 'sql-wasm.wasm'))
+  } catch {}
+
+  // Strategy 2: from cwd (dev mode: project root)
+  candidates.push(path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
+
+  // Strategy 3: one level up from cwd
+  candidates.push(path.join(process.cwd(), '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
+
+  // Strategy 4: relative to execPath
+  candidates.push(path.join(path.dirname(process.execPath), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        console.log('[DB] Found WASM at:', p)
+        return p
+      }
+    } catch {}
+  }
+
+  console.warn('[DB] No local WASM found. Tried:', candidates)
+  return null
+}
+
 export async function initDatabase(vaultPath: string): Promise<Database> {
   dbPath = path.join(vaultPath, '.mynote.db')
+  console.log('[DB] Initializing database at:', dbPath)
 
-  // Load existing DB or create new one
-  const SQL = await initSqlJs()
+  // Load SQL.js
+  const wasmPath = resolveWasmPath()
+  let SQL
+  try {
+    SQL = wasmPath
+      ? await initSqlJs({ locateFile: () => wasmPath })
+      : await initSqlJs()
+    console.log('[DB] SQL.js loaded successfully')
+  } catch (err) {
+    console.error('[DB] Failed to load SQL.js WASM:', err)
+    throw new Error(`SQL.js 加载失败: ${err instanceof Error ? err.message : String(err)}。请检查网络连接或 node_modules 是否完整。`)
+  }
 
   if (fs.existsSync(dbPath)) {
+    console.log('[DB] Loading existing database')
     const buffer = fs.readFileSync(dbPath)
     db = new SQL.Database(buffer)
   } else {
+    console.log('[DB] Creating new database')
     db = new SQL.Database()
     createSchema(db)
     saveDatabase()
+    console.log('[DB] New database saved to:', dbPath)
   }
 
   // Run migrations for both new and existing databases
-  try { db.run('ALTER TABLE todos ADD COLUMN deadline TEXT') } catch { /* column already exists */ }
+  try { db.run('ALTER TABLE todos ADD COLUMN deadline TEXT') } catch {}
+  try { db.run('ALTER TABLE notes ADD COLUMN archived INTEGER DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE notes ADD COLUMN pinned INTEGER DEFAULT 0') } catch {}
   saveDatabase()
 
   return db

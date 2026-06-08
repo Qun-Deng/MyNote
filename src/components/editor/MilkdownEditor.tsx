@@ -22,6 +22,7 @@ import {
   handleEditorShortcut,
   handleTableCellMouseDown,
   handleTaskItemClick,
+  handleWikilinkClick,
   type TableActionId,
   type SlashTrigger,
 } from './editorInteractions'
@@ -30,6 +31,7 @@ import '../../styles/milkdown.css'
 interface MilkdownEditorProps {
   content: string
   onContentChange: (markdown: string) => void
+  onNavigate?: (path: string) => void
   readOnly?: boolean
 }
 
@@ -354,12 +356,64 @@ const tagHighlightProsePlugin = new Plugin({
 
 const tagHighlight = $prose(() => tagHighlightProsePlugin)
 
-export default function MilkdownEditor({ content, onContentChange, readOnly = false }: MilkdownEditorProps) {
+// ── Wikilink highlight plugin ───────────────────────────────────────
+
+const wikilinkPluginKey = new PluginKey('mdWikilink')
+const WIKILINK_REGEX = /\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]/g
+
+function buildWikilinkDecorations(doc: ProseNode) {
+  const decos: Decoration[] = []
+
+  doc.descendants((node: ProseNode, pos: number) => {
+    if (!node.isText) return
+    const text = node.text ?? ''
+    let match: RegExpExecArray | null
+    WIKILINK_REGEX.lastIndex = 0
+
+    while ((match = WIKILINK_REGEX.exec(text)) !== null) {
+      const from = pos + match.index
+      const to = from + match[0].length
+      decos.push(
+        Decoration.inline(from, to, { class: 'md-wikilink' }),
+      )
+    }
+  })
+
+  return DecorationSet.create(doc, decos)
+}
+
+const wikilinkProsePlugin = new Plugin({
+  key: wikilinkPluginKey,
+  state: {
+    init(_, state) {
+      return buildWikilinkDecorations(state.doc)
+    },
+    apply(tr, prev, _oldState, newState) {
+      if (!tr.docChanged) return prev
+      return buildWikilinkDecorations(newState.doc)
+    },
+  },
+  props: {
+    decorations(state) {
+      try {
+        return wikilinkPluginKey.getState(state)
+      } catch {
+        return DecorationSet.empty
+      }
+    },
+  },
+})
+
+const wikilinkHighlight = $prose(() => wikilinkProsePlugin)
+
+export default function MilkdownEditor({ content, onContentChange, onNavigate, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const tableActionLockRef = useRef(false)
   const initialized = useRef(false)
   const frontmatterRef = useRef('')
+  const onNavigateRef = useRef(onNavigate)
+  onNavigateRef.current = onNavigate
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [tableAddControls, setTableAddControls] = useState<{
@@ -508,6 +562,7 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
       .use(markdownIndent)
       .use(collapsibleList)
       .use(tagHighlight)
+      .use(wikilinkHighlight)
       .create()
       .then((created) => {
         editor = created
@@ -540,7 +595,11 @@ export default function MilkdownEditor({ content, onContentChange, readOnly = fa
 
     const handleClick = (event: MouseEvent) => {
       const editor = editorRef.current
-      if (editor && handleTaskItemClick(editor, event)) return
+      if (!editor) return
+      // Wikilink navigation: Ctrl/Cmd+click only
+      if ((event.ctrlKey || event.metaKey) && handleWikilinkClick(editor, event, onNavigateRef.current)) return
+      // Task item click
+      if (handleTaskItemClick(editor, event)) return
       closeSlashMenu()
     }
 

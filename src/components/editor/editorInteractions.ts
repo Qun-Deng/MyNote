@@ -26,6 +26,81 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
+// ── Wikilink navigation ──
+
+const WIKILINK_REGEX = /\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]/g
+
+export function handleWikilinkClick(
+  editor: Editor,
+  event: MouseEvent,
+  onNavigate?: (path: string) => void,
+): boolean {
+  if (!onNavigate) return false
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return false
+
+  // Find the text node and position under click
+  const view = editor.ctx.get(editorViewCtx)
+  const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })
+  if (!pos) return false
+
+  // Check if the clicked position is inside a wikilink
+  const $pos = view.state.doc.resolve(pos.pos)
+  const parentText = $pos.parent.textContent
+  const offset = $pos.parentOffset
+
+  // Search for wikilinks in the text node
+  let match: RegExpExecArray | null
+  WIKILINK_REGEX.lastIndex = 0
+  while ((match = WIKILINK_REGEX.exec(parentText)) !== null) {
+    const start = match.index
+    const end = start + match[0].length
+    if (offset >= start && offset <= end) {
+      const pageName = match[1].trim()
+      // Try to navigate — the callback handles resolution
+      event.preventDefault()
+      event.stopPropagation()
+      onNavigate(pageName)
+      return true
+    }
+  }
+  return false
+}
+
+// Resolve a wikilink page name to a file path by searching the vault
+export async function resolveWikilinkPath(pageName: string): Promise<string | null> {
+  try {
+    // Ask the backend to search for matching note
+    const allNotes = await window.mynote.notes.list()
+    const name = pageName.toLowerCase().replace(/\.md$/i, '')
+
+    // Exact path match
+    const exact = allNotes.find((n: any) =>
+      n.path.toLowerCase() === pageName ||
+      n.path.toLowerCase() === pageName + '.md' ||
+      n.path.toLowerCase().replace(/\\/g, '/') === pageName.toLowerCase()
+    )
+    if (exact) return exact.path
+
+    // Filename match
+    const byName = allNotes.find((n: any) => {
+      const fname = n.path.split('/').pop()?.replace(/\.md$/i, '')?.toLowerCase()
+      return fname === name
+    })
+    if (byName) return byName.path
+
+    // Partial match
+    const partial = allNotes.find((n: any) =>
+      n.path.toLowerCase().includes(name)
+    )
+    if (partial) return partial.path
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 type CommandLike<T = unknown> = {
   key: unknown
   run?: (payload?: T) => boolean
@@ -91,12 +166,6 @@ export const slashActions: SlashAction[] = [
     label: '页面引用',
     description: '',
     keywords: ['page', '页面', 'wiki', '引用'],
-  },
-  {
-    id: 'link-to-page',
-    label: '链接到页面',
-    description: '',
-    keywords: ['link', '链接', 'page', '页面', 'url'],
   },
 ]
 
@@ -328,16 +397,11 @@ export function executeEditorAction(editor: Editor, actionId: string, range?: Sl
       // Insert wiki-style page reference: [[Page Name]]
       const { state, dispatch } = view
       const { from } = state.selection
-      const tr = state.tr.insertText('[[Page Name]]', from)
+      const text = 'Page Name'
+      const tr = state.tr.insertText(`[[${text}]]`, from)
       dispatch(tr.scrollIntoView())
-      return true
-    }
-    case 'link-to-page': {
-      // Insert markdown link to page: [Link Text](./page-name.md)
-      const { state, dispatch } = view
-      const { from } = state.selection
-      const tr = state.tr.insertText('[Link Text](./page-name.md)', from)
-      dispatch(tr.scrollIntoView())
+      // Select the placeholder text so user can type immediately
+      selectTextRange(view, from, text)
       return true
     }
     default:

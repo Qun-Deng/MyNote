@@ -9,6 +9,18 @@ export interface NoteMeta {
   tags: string[]
   is_diary: boolean
   diary_date: string | null
+  archived: boolean
+  pinned: boolean
+}
+
+export interface Backlink {
+  from_path: string
+  context: string
+}
+
+export interface NoteStats {
+  wordCount: number
+  charCount: number
 }
 
 export interface NoteContent {
@@ -118,6 +130,58 @@ export interface IpcChannels {
   'todos:update-deadline': {
     args: [todoId: number, deadline: string | null]
     result: void
+  }
+
+  // Archive & Pin
+  'notes:set-archived': {
+    args: [filePath: string, archived: boolean]
+    result: void
+  }
+  'notes:set-pinned': {
+    args: [filePath: string, pinned: boolean]
+    result: void
+  }
+  'notes:batch-archive': {
+    args: [filePaths: string[], archived: boolean]
+    result: void
+  }
+  'notes:batch-delete': {
+    args: [filePaths: string[]]
+    result: void
+  }
+  'notes:batch-tag': {
+    args: [filePaths: string[], tag: string]
+    result: void
+  }
+
+  // Tag Management
+  'tags:rename': {
+    args: [oldName: string, newName: string]
+    result: string[]
+  }
+  'tags:delete': {
+    args: [tagName: string]
+    result: string[]
+  }
+
+  // Links & Backlinks
+  'notes:update-links': {
+    args: [filePath: string, links: { target: string; context: string }[]]
+    result: void
+  }
+  'notes:backlinks': {
+    args: [notePath: string]
+    result: Backlink[]
+  }
+  'notes:forward-links': {
+    args: [notePath: string]
+    result: string[]
+  }
+
+  // Stats
+  'notes:stats': {
+    args: [filePath: string]
+    result: NoteStats | null
   }
 
   // Search
