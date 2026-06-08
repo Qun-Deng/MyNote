@@ -33,6 +33,23 @@ function ensureDir(dirPath: string) {
   }
 }
 
+function normalizeNoteFileName(title: string): string {
+  const trimmed = title.trim()
+  const base = trimmed.toLowerCase().endsWith('.md') ? trimmed.slice(0, -3) : trimmed
+  const safeBase = base
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim()
+  return `${safeBase || 'Untitled'}.md`
+}
+
+function normalizeNotePath(filePath: string): string {
+  const dir = path.dirname(filePath)
+  const fileName = normalizeNoteFileName(path.basename(filePath))
+  return (dir === '.' ? fileName : path.join(dir, fileName)).replace(/\\/g, '/')
+}
+
 function getTitle(filePath: string, content: string): string {
   // Try to extract from first heading
   const match = content.match(/^#\s+(.+)$/m)
@@ -252,12 +269,14 @@ export function registerNotesIPC() {
   // Create a note
   ipcMain.handle('notes:create', async (_event, folderPath: string, title: string) => {
     if (!vaultPath) throw new Error('Vault not initialized')
-    const fileName = title.endsWith('.md') ? title : `${title}.md`
+    const fileName = normalizeNoteFileName(title)
     const filePath = path.join(folderPath, fileName).replace(/\\/g, '/')
     const fullPath = resolveNotePath(filePath)
     ensureDir(path.dirname(fullPath))
+    if (fs.existsSync(fullPath)) throw new Error(`Note already exists: ${filePath}`)
 
-    const template = `# ${title}\n\n`
+    const noteTitle = path.basename(fileName, '.md')
+    const template = `# ${noteTitle}\n\n`
     fs.writeFileSync(fullPath, template, 'utf-8')
 
     // Sync to DB
@@ -266,7 +285,7 @@ export function registerNotesIPC() {
     return {
       id: 0,
       path: filePath,
-      title,
+      title: noteTitle,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       tags: [],
@@ -291,12 +310,26 @@ export function registerNotesIPC() {
   // Rename a note
   ipcMain.handle('notes:rename', async (_event, oldPath: string, newPath: string) => {
     if (!vaultPath) throw new Error('Vault not initialized')
+    const normalizedNewPath = normalizeNotePath(newPath)
     const oldFull = resolveNotePath(oldPath)
-    const newFull = resolveNotePath(newPath)
+    const newFull = resolveNotePath(normalizedNewPath)
     if (fs.existsSync(oldFull)) {
+      if (fs.existsSync(newFull) && oldFull !== newFull) {
+        throw new Error(`Target already exists: ${normalizedNewPath}`)
+      }
       ensureDir(path.dirname(newFull))
-      fs.renameSync(oldFull, newFull)
+      if (oldFull !== newFull) {
+        fs.renameSync(oldFull, newFull)
+      }
+      const content = fs.readFileSync(newFull, 'utf-8')
+      syncNoteToDB(normalizedNewPath, content)
+      if (oldPath !== normalizedNewPath) {
+        try {
+          deleteNoteByPath(oldPath)
+        } catch {}
+      }
     }
+    return normalizedNewPath
   })
 
   // Vault tree

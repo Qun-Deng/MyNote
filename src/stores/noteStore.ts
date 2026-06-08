@@ -15,6 +15,8 @@ interface NoteState {
   openNote: (filePath: string) => Promise<void>
   /** Set content (from editor) */
   setContent: (content: string) => void
+  /** Patch currently open note metadata */
+  updateCurrentMeta: (patch: Partial<NoteMeta>) => void
   /** Save current note */
   saveNote: () => Promise<void>
   /** Close current note */
@@ -49,6 +51,12 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   setContent: (content: string) => {
     set({ currentContent: content, dirty: true })
+  },
+
+  updateCurrentMeta: (patch: Partial<NoteMeta>) => {
+    const { currentMeta } = get()
+    if (!currentMeta) return
+    set({ currentMeta: { ...currentMeta, ...patch } })
   },
 
   saveNote: async () => {

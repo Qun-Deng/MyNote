@@ -14,6 +14,24 @@ import VaultPrompt from './components/layout/VaultPrompt'
 import { useState, useEffect, useCallback } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
+function extractMarkdownTitle(content: string) {
+  return content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null
+}
+
+function safeMarkdownFileName(title: string) {
+  const cleaned = title
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `${cleaned || 'Untitled'}.md`
+}
+
+function renamePathByTitle(filePath: string, title: string) {
+  const parts = filePath.split('/')
+  parts[parts.length - 1] = safeMarkdownFileName(title)
+  return parts.join('/')
+}
+
 function App() {
   const activeView = useUIStore((s) => s.activeView)
   const openNotePath = useUIStore((s) => s.openNotePath)
@@ -23,11 +41,13 @@ function App() {
   const currentMeta = useNoteStore((s) => s.currentMeta)
   const currentContent = useNoteStore((s) => s.currentContent)
   const setContent = useNoteStore((s) => s.setContent)
+  const updateCurrentMeta = useNoteStore((s) => s.updateCurrentMeta)
   const saveNote = useNoteStore((s) => s.saveNote)
   const closeNote = useNoteStore((s) => s.closeNote)
 
   const vaultPath = useVaultStore((s) => s.vaultPath)
   const setVaultPath = useVaultStore((s) => s.setVaultPath)
+  const refreshTree = useVaultStore((s) => s.refreshTree)
 
   const [vaultReady, setVaultReady] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -67,14 +87,32 @@ function App() {
   // Auto-save logic
   const handleSave = useCallback(
     async (filePath: string, content: string) => {
+      let savedPath = filePath
       await window.mynote.notes.write(filePath, content)
+      const title = extractMarkdownTitle(content)
+      if (title && currentMeta && !currentMeta.is_diary) {
+        const newPath = renamePathByTitle(filePath, title)
+        if (newPath !== filePath) {
+          try {
+            const normalizedPath = await window.mynote.notes.rename(filePath, newPath)
+            savedPath = normalizedPath
+            setOpenNotePath(normalizedPath)
+            updateCurrentMeta({ path: normalizedPath, title })
+            await refreshTree()
+          } catch (err) {
+            console.error('Failed to rename note from title:', err)
+          }
+        } else if (title !== currentMeta.title) {
+          updateCurrentMeta({ title })
+        }
+      }
       try {
-        await window.mynote.todos.extract(filePath, content)
+        await window.mynote.todos.extract(savedPath, content)
       } catch {
         // Todos extraction will be fully implemented in Phase 4
       }
     },
-    []
+    [currentMeta, refreshTree, setOpenNotePath, updateCurrentMeta]
   )
 
   const { flush } = useAutoSave({
