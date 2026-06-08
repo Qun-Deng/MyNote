@@ -114,8 +114,11 @@ export default function DiaryView() {
   // Load selected-date diary (auto-create)
   useEffect(() => {
     let cancelled = false
+    // Immediately clear old content to prevent date bleed
+    setDiaryContent('')
+    setDiaryPath(null)
+    setLoading(true)
     const load = async () => {
-      setLoading(true)
       try {
         let diary = await window.mynote.diary.get(selectedDate)
         if (!diary) diary = await window.mynote.diary.create(selectedDate)
@@ -175,9 +178,17 @@ export default function DiaryView() {
   }
 
   // Click date → auto-create + open editor
+  const goPrevDay = () => {
+    const prev = format(addDays(new Date(selectedDate), -1), 'yyyy-MM-dd')
+    setSelectedDate(prev)
+  }
+  const goNextDay = () => {
+    const next = format(addDays(new Date(selectedDate), 1), 'yyyy-MM-dd')
+    setSelectedDate(next)
+  }
+
   const handleSelectDate = async (ds: string) => {
     setSelectedDate(ds)
-    // Pre-create and open
     try {
       let diary = await window.mynote.diary.get(ds)
       if (!diary) diary = await window.mynote.diary.create(ds)
@@ -231,10 +242,18 @@ export default function DiaryView() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-surface-200 flex-shrink-0">
-          <h2 className="text-base font-semibold text-surface-900">
-            {dateLabel}
-            {selectedDate === today && <span className="text-xs text-accent-500 font-normal ml-2">今天</span>}
-          </h2>
+          <div className="flex items-center gap-2">
+            <button onClick={goPrevDay} className="p-0.5 hover:bg-surface-100 rounded transition-colors">
+              <ChevronLeft className="w-4 h-4 text-surface-500" />
+            </button>
+            <h2 className="text-base font-semibold text-surface-900">
+              {dateLabel}
+              {selectedDate === today && <span className="text-xs text-accent-500 font-normal ml-2">今天</span>}
+            </h2>
+            <button onClick={goNextDay} className="p-0.5 hover:bg-surface-100 rounded transition-colors">
+              <ChevronRight className="w-4 h-4 text-surface-500" />
+            </button>
+          </div>
           <div className="flex gap-2">
             <button onClick={() => setShowAdd(!showAdd)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-accent-600
