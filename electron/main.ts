@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, protocol } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
@@ -11,6 +11,8 @@ import { registerAssetsIPC, setVaultPath as setAssetsVaultPath } from './ipc/ass
 import { initDatabase } from './db/connection'
 
 let mainWindow: BrowserWindow | null = null
+let vaultWatcher: fs.FSWatcher | null = null
+let vaultWatchTimer: NodeJS.Timeout | null = null
 
 // ====== Config Persistence ======
 
@@ -81,6 +83,64 @@ function createWindow() {
   })
 }
 
+function registerAssetProtocol() {
+  protocol.registerFileProtocol('mynote-asset', (request, callback) => {
+    const vaultPath = getVaultPath()
+    if (!vaultPath) {
+      callback({ error: -6 })
+      return
+    }
+
+    try {
+      const url = new URL(request.url)
+      const rawPath = decodeURIComponent(url.pathname).replace(/^\/+/, '')
+      const relPath = path.normalize(rawPath)
+      const fullPath = path.resolve(vaultPath, relPath)
+      const vaultRoot = path.resolve(vaultPath)
+
+      if (!fullPath.startsWith(vaultRoot + path.sep) || !fs.existsSync(fullPath)) {
+        callback({ error: -6 })
+        return
+      }
+
+      callback({ path: fullPath })
+    } catch {
+      callback({ error: -2 })
+    }
+  })
+}
+
+function notifyVaultChanged() {
+  if (vaultWatchTimer) clearTimeout(vaultWatchTimer)
+  vaultWatchTimer = setTimeout(() => {
+    mainWindow?.webContents.send('vault:changed')
+  }, 150)
+}
+
+function startVaultWatcher(vaultRoot: string) {
+  if (vaultWatcher) {
+    vaultWatcher.close()
+    vaultWatcher = null
+  }
+  if (vaultWatchTimer) {
+    clearTimeout(vaultWatchTimer)
+    vaultWatchTimer = null
+  }
+  try {
+    vaultWatcher = fs.watch(vaultRoot, { recursive: true }, (_eventType, filename) => {
+      const relPath = String(filename ?? '').replace(/\\/g, '/')
+      if (!relPath) return
+      if (relPath.startsWith('.') || relPath.startsWith('assets/')) return
+      notifyVaultChanged()
+    })
+    vaultWatcher.on('error', (err) => {
+      console.error('Vault watcher failed:', err)
+    })
+  } catch (err) {
+    console.error('Failed to start vault watcher:', err)
+  }
+}
+
 // ====== Window Controls ======
 
 ipcMain.handle('window:minimize', () => {
@@ -113,6 +173,7 @@ ipcMain.handle('vault:select', async () => {
   if (!result.canceled && result.filePaths.length > 0) {
     setVaultPath(result.filePaths[0])
     setAssetsVaultPath(result.filePaths[0])
+    startVaultWatcher(result.filePaths[0])
     saveConfig({ vaultPath: result.filePaths[0] })
     return result.filePaths[0]
   }
@@ -130,6 +191,7 @@ ipcMain.handle('vault:get-saved-path', () => {
 ipcMain.handle('vault:init', async (_event, newVaultPath: string) => {
   setVaultPath(newVaultPath)
   setAssetsVaultPath(newVaultPath)
+  startVaultWatcher(newVaultPath)
   saveConfig({ vaultPath: newVaultPath })
   // Create basic directory structure
   const dirs = ['notes', 'diary', 'assets']
@@ -229,6 +291,16 @@ ipcMain.handle('vault:show-context-menu', async (_event, itemPath: string, itemT
     },
     { type: 'separator' },
     {
+      label: '复制路径',
+      enabled: !targetIsRoot && targetExists,
+      click: () => {
+        if (targetFullPath) {
+          clipboard.writeText(targetFullPath)
+        }
+      },
+    },
+    { type: 'separator' },
+    {
       label: '打开文件资源管理器',
       enabled: !!vp,
       click: async () => {
@@ -266,6 +338,7 @@ registerAssetsIPC()
 // ====== App Lifecycle ======
 
 app.whenReady().then(() => {
+  registerAssetProtocol()
   createWindow()
 
   app.on('activate', () => {
@@ -278,5 +351,16 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+  }
+})
+
+app.on('before-quit', () => {
+  if (vaultWatchTimer) {
+    clearTimeout(vaultWatchTimer)
+    vaultWatchTimer = null
+  }
+  if (vaultWatcher) {
+    vaultWatcher.close()
+    vaultWatcher = null
   }
 })

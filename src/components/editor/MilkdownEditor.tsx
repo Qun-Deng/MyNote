@@ -26,12 +26,15 @@ import {
   type TableActionId,
   type SlashTrigger,
 } from './editorInteractions'
+import katex from 'katex'
 import '../../styles/milkdown.css'
+import 'katex/dist/katex.min.css'
 
 interface MilkdownEditorProps {
   content: string
   onContentChange: (markdown: string) => void
   onNavigate?: (path: string) => void
+  onTagClick?: (tag: string) => void
   readOnly?: boolean
 }
 
@@ -308,7 +311,7 @@ const collapsibleList = $prose(() => collapsibleListProsePlugin)
 
 const tagHighlightPluginKey = new PluginKey('mdTagHighlight')
 
-const TAG_REGEX = /#[\w一-鿿㐀-䶿＀-￯-]+/g
+const TAG_REGEX = /(^|[\s([{])(\\?)#([\p{L}\p{N}_-]+)/gu
 
 function buildTagDecorations(doc: ProseNode) {
   const decos: Decoration[] = []
@@ -321,8 +324,10 @@ function buildTagDecorations(doc: ProseNode) {
     TAG_REGEX.lastIndex = 0
 
     while ((match = TAG_REGEX.exec(text)) !== null) {
-      const from = pos + match.index
-      const to = from + match[0].length
+      const prefixLength = match[1]?.length ?? 0
+      const escapeLength = match[2]?.length ?? 0
+      const from = pos + match.index + prefixLength + escapeLength
+      const to = from + match[3].length + 1
       decos.push(
         Decoration.inline(from, to, { class: 'md-tag' }),
       )
@@ -406,7 +411,404 @@ const wikilinkProsePlugin = new Plugin({
 
 const wikilinkHighlight = $prose(() => wikilinkProsePlugin)
 
-export default function MilkdownEditor({ content, onContentChange, onNavigate, readOnly = false }: MilkdownEditorProps) {
+// ── Math (KaTeX) plugin ────────────────────────────────────────────
+// Renders $inline$ and $$block$$ math with KaTeX via widget decorations.
+// While the cursor is inside the source, keep markdown visible for editing.
+
+const mathPluginKey = new PluginKey('mdMath')
+
+function isMathRangeActive(selection: { from: number; to: number; empty: boolean }, from: number, to: number) {
+  if (selection.empty) return selection.from > from && selection.from < to
+  return selection.from <= to && selection.to >= from
+}
+
+function createMathPreview(
+  kind: 'inline' | 'block',
+  formula: string,
+  from: number,
+  to: number,
+  delimiterSize: number,
+) {
+  const html = katex.renderToString(formula, {
+    displayMode: kind === 'block',
+    throwOnError: false,
+  })
+  const element = document.createElement(kind === 'block' ? 'div' : 'span')
+  element.className = kind === 'block' ? 'katex-block' : 'katex-inline'
+  element.innerHTML = html
+  element.contentEditable = 'false'
+  element.dataset.mdMathPreview = 'true'
+  element.dataset.mdMathFrom = String(from)
+  element.dataset.mdMathTo = String(to)
+  element.dataset.mdMathDelimiter = String(delimiterSize)
+  element.title = 'Double-click to edit formula'
+  return element
+}
+
+function buildMathDecorations(doc: ProseNode, selection: { from: number; to: number; empty: boolean }) {
+  const decos: Decoration[] = []
+
+  doc.descendants((node: ProseNode, pos: number) => {
+    if (!node.isTextblock || node.type.spec.code) return
+
+    const pieces: Array<{ textStart: number; textEnd: number; docStart: number }> = []
+    let text = ''
+    node.descendants((child: ProseNode, childPos: number) => {
+      if (!child.isText) return
+      const value = child.text ?? ''
+      if (!value) return
+      pieces.push({
+        textStart: text.length,
+        textEnd: text.length + value.length,
+        docStart: pos + 1 + childPos,
+      })
+      text += value
+    })
+    if (!text) return false
+
+    const offsetToDocPos = (offset: number) => {
+      for (const piece of pieces) {
+        if (offset >= piece.textStart && offset <= piece.textEnd) {
+          return piece.docStart + offset - piece.textStart
+        }
+      }
+      return null
+    }
+
+    const blockRanges: Array<{ start: number; end: number }> = []
+    const blockRegex = /(^|\n)([ \t]*)\$\$([\s\S]+?)\$\$[ \t]*(?=\n|$)/g
+    let match: RegExpExecArray | null
+
+    // Display math only when $$...$$ is its own line.
+    while ((match = blockRegex.exec(text)) !== null) {
+      const sourceStart = match.index + match[1].length + match[2].length
+      const sourceEnd = sourceStart + match[0].length - match[1].length - match[2].length
+      const formula = match[3].trim()
+      if (!formula) continue
+      blockRanges.push({ start: sourceStart, end: sourceEnd })
+
+      const from = offsetToDocPos(sourceStart)
+      const to = offsetToDocPos(sourceEnd)
+      if (from === null || to === null) continue
+
+      try {
+        const active = isMathRangeActive(selection, from, to)
+        decos.push(Decoration.inline(from, to, {
+          class: active ? 'md-math-source md-math-source-active' : 'md-math-source',
+        }))
+        if (!active) {
+          decos.push(Decoration.widget(
+            from,
+            createMathPreview('block', formula, from, to, 2),
+            { side: -1 },
+          ))
+        }
+      } catch {}
+    }
+
+    const isInBlockRange = (offset: number) => blockRanges.some(({ start, end }) => offset >= start && offset < end)
+    const isEscaped = (offset: number) => {
+      let slashCount = 0
+      for (let i = offset - 1; i >= 0 && text[i] === '\\'; i--) slashCount++
+      return slashCount % 2 === 1
+    }
+
+    // Inline math: $...$ anywhere inside a text block, including around CJK text.
+    for (let start = 0; start < text.length; start++) {
+      if (text[start] !== '$' || text[start + 1] === '$' || text[start - 1] === '$' || isEscaped(start) || isInBlockRange(start)) {
+        continue
+      }
+
+      let end = start + 1
+      while (end < text.length) {
+        if (text[end] === '\n') break
+        if (text[end] === '$' && text[end + 1] !== '$' && !isEscaped(end)) break
+        end++
+      }
+
+      if (text[end] !== '$' || isInBlockRange(end)) continue
+      const formula = text.slice(start + 1, end).trim()
+      if (!formula) continue
+
+      const from = offsetToDocPos(start)
+      const to = offsetToDocPos(end + 1)
+      if (from === null || to === null) continue
+
+      try {
+        const active = isMathRangeActive(selection, from, to)
+        decos.push(Decoration.inline(from, to, {
+          class: active ? 'md-math-source md-math-source-active' : 'md-math-source',
+        }))
+        if (!active) {
+          decos.push(Decoration.widget(
+            from,
+            createMathPreview('inline', formula, from, to, 1),
+            { side: -1 },
+          ))
+        }
+      } catch {}
+
+      start = end
+    }
+
+    return false
+  })
+
+  return DecorationSet.create(doc, decos)
+}
+
+const mathProsePlugin = new Plugin({
+  key: mathPluginKey,
+  state: {
+    init(_, state) {
+      return buildMathDecorations(state.doc, state.selection)
+    },
+    apply(tr, prev, oldState, newState) {
+      if (!tr.docChanged && oldState.selection.eq(newState.selection)) return prev
+      return buildMathDecorations(newState.doc, newState.selection)
+    },
+  },
+  props: {
+    decorations(state) {
+      try {
+        return mathPluginKey.getState(state)
+      } catch {
+        return DecorationSet.empty
+      }
+    },
+    handleDOMEvents: {
+      mousedown(_view, event) {
+        const target = event.target
+        if (!(target instanceof HTMLElement)) return false
+        if (!target.closest('[data-md-math-preview="true"]')) return false
+        event.preventDefault()
+        return true
+      },
+      dblclick(view, event) {
+        const target = event.target
+        if (!(target instanceof HTMLElement)) return false
+        const preview = target.closest<HTMLElement>('[data-md-math-preview="true"]')
+        if (!preview) return false
+
+        const from = Number(preview.dataset.mdMathFrom)
+        const to = Number(preview.dataset.mdMathTo)
+        const delimiterSize = Number(preview.dataset.mdMathDelimiter)
+        if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(delimiterSize)) return false
+
+        const innerFrom = Math.min(to, from + delimiterSize)
+        const innerTo = Math.max(innerFrom, to - delimiterSize)
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, innerFrom, innerTo))
+            .scrollIntoView(),
+        )
+        view.focus()
+        event.preventDefault()
+        event.stopPropagation()
+        return true
+      },
+    },
+  },
+})
+
+const mathHighlight = $prose(() => mathProsePlugin)
+
+// ── Local asset images ───────────────────────────────────────────────
+
+function assetSrcForEditor(src: string) {
+  const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (!normalized.startsWith('assets/')) return src
+  const encoded = normalized.split('/').map(encodeURIComponent).join('/')
+  return `mynote-asset:///${encoded}`
+}
+
+const imageViewProsePlugin = new Plugin({
+  props: {
+    nodeViews: {
+      image(node) {
+        const dom = document.createElement('img')
+        const updateDom = (imageNode: ProseNode) => {
+          const src = String(imageNode.attrs.src ?? '')
+          const alt = String(imageNode.attrs.alt ?? '')
+          const title = imageNode.attrs.title ? String(imageNode.attrs.title) : ''
+          dom.src = assetSrcForEditor(src)
+          dom.alt = alt
+          if (title) dom.title = title
+          else dom.removeAttribute('title')
+          dom.dataset.mdSrc = src
+        }
+        updateDom(node)
+        return {
+          dom,
+          update(updatedNode) {
+            if (updatedNode.type !== node.type) return false
+            updateDom(updatedNode)
+            return true
+          },
+        }
+      },
+    },
+  },
+})
+
+const imageView = $prose(() => imageViewProsePlugin)
+
+// ── Image paste/drop plugin ──────────────────────────────────────────
+// Intercepts image paste from clipboard and image drop from filesystem
+// at the ProseMirror level (before the Milkdown clipboard plugin),
+// saving files to assets/ and inserting a live image node.
+
+function insertImageAsset(
+  view: {
+    state: any
+    dispatch: (tr: any) => void
+    focus: () => void
+  },
+  relPath: string,
+  range?: { from: number; to: number },
+  addTrailingNewline = false,
+) {
+  const { state } = view
+  const imageType = state.schema.nodes.image
+  const markdown = `![](${relPath})${addTrailingNewline ? '\n' : ''}`
+
+  if (!imageType) {
+    const from = range?.from ?? state.selection.from
+    const to = range?.to ?? state.selection.to
+    view.dispatch(state.tr.insertText(markdown, from, to).scrollIntoView())
+    view.focus()
+    return
+  }
+
+  const imageNode = imageType.createAndFill({ src: relPath, alt: '', title: null })
+    ?? imageType.create({ src: relPath, alt: '', title: null })
+  const from = range?.from ?? state.selection.from
+  const to = range?.to ?? state.selection.to
+  let tr = state.tr.replaceWith(from, to, imageNode)
+  let nextPos = from + imageNode.nodeSize
+  if (addTrailingNewline) {
+    tr = tr.insertText('\n', nextPos)
+    nextPos += 1
+  }
+  nextPos = Math.min(nextPos, tr.doc.content.size)
+  tr = tr.setSelection(TextSelection.near(tr.doc.resolve(nextPos)))
+  view.dispatch(tr.scrollIntoView())
+  view.focus()
+}
+
+function handleImagePaste(view: any, event: ClipboardEvent) {
+  const editable = view.props.editable?.(view.state)
+  if (editable === false) return false
+
+  const items = event.clipboardData?.items
+  if (!items) return false
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (!item.type.startsWith('image/')) continue
+
+    const blob = item.getAsFile()
+    if (!blob) continue
+    event.preventDefault()
+    event.stopPropagation()
+    const range = {
+      from: view.state.selection.from,
+      to: view.state.selection.to,
+    }
+
+    ;(async () => {
+      try {
+        const buffer = await blob.arrayBuffer()
+        const ext = blob.type.split('/')[1] || 'png'
+        const filename = `pasted-${Date.now()}.${ext}`
+        const relPath = await window.mynote.assets.saveImage(buffer, filename)
+        insertImageAsset(view, relPath, range)
+      } catch (err) {
+        console.error('Failed to save pasted image:', err)
+      }
+    })()
+
+    return true
+  }
+
+  return false
+}
+
+function handleImageDrop(view: any, event: DragEvent) {
+  const editable = view.props.editable?.(view.state)
+  if (editable === false) return false
+
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return false
+
+  const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
+  if (imageFiles.length === 0) return false
+
+  event.preventDefault()
+  event.stopPropagation()
+  const dropPos = view.posAtCoords({ left: event.clientX, top: event.clientY })
+  const firstRange = {
+    from: dropPos?.pos ?? view.state.selection.from,
+    to: dropPos?.pos ?? view.state.selection.from,
+  }
+
+  ;(async () => {
+    for (const [index, file] of imageFiles.entries()) {
+      try {
+        const buffer = await file.arrayBuffer()
+        const relPath = await window.mynote.assets.saveImage(buffer, file.name)
+        insertImageAsset(view, relPath, index === 0 ? firstRange : undefined, true)
+      } catch (err) {
+        console.error('Failed to save dropped image:', err)
+      }
+    }
+  })()
+
+  return true
+}
+
+const imagePasteProsePlugin = new Plugin({
+  props: {
+    handlePaste(view, event) {
+      return handleImagePaste(view, event)
+    },
+
+    handleDrop(view, event) {
+      return handleImageDrop(view, event)
+    },
+
+    handleDOMEvents: {
+      paste(view, event) {
+        return handleImagePaste(view, event)
+      },
+      drop(view, event) {
+        return handleImageDrop(view, event)
+      },
+      dragover(view, event) {
+        if (event.dataTransfer?.types.includes('Files')) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          return true
+        }
+        return false
+      },
+    },
+  },
+})
+
+const imagePaste = $prose(() => imagePasteProsePlugin)
+
+function normalizeClickedTag(text: string) {
+  return text
+    .trim()
+    .replace(/^\\+/, '')
+    .replace(/^[\[]?#/, '')
+    .replace(/[\]]+$/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+export default function MilkdownEditor({ content, onContentChange, onNavigate, onTagClick, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const tableActionLockRef = useRef(false)
@@ -414,6 +816,8 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, r
   const frontmatterRef = useRef('')
   const onNavigateRef = useRef(onNavigate)
   onNavigateRef.current = onNavigate
+  const onTagClickRef = useRef(onTagClick)
+  onTagClickRef.current = onTagClick
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [tableAddControls, setTableAddControls] = useState<{
@@ -558,11 +962,14 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, r
       .use(listener)
       .use(prism)
       .use(emoji)
+      .use(imageView)
+      .use(imagePaste)
       .use(clipboard)
       .use(markdownIndent)
       .use(collapsibleList)
       .use(tagHighlight)
       .use(wikilinkHighlight)
+      .use(mathHighlight)
       .create()
       .then((created) => {
         editor = created
@@ -574,75 +981,6 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, r
         listenerManager.markdownUpdated((_ctx, markdown) => {
           onContentChange(mergeFrontmatter(frontmatterRef.current, markdown))
         })
-
-        // ── Image paste handler ──
-        const view = editor.ctx.get(editorViewCtx)
-        const pmDom = view.dom
-
-        const handleImagePaste = async (e: ClipboardEvent) => {
-          const items = e.clipboardData?.items
-          if (!items) return
-
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i]
-            if (item.type.startsWith('image/')) {
-              e.preventDefault()
-              e.stopPropagation()
-              const blob = item.getAsFile()
-              if (!blob) continue
-              try {
-                const buffer = await blob.arrayBuffer()
-                const filename = `pasted-${Date.now()}.${blob.type.split('/')[1] || 'png'}`
-                const relPath = await window.mynote.assets.saveImage(buffer, filename)
-                const { state, dispatch } = view
-                const tr = state.tr.insertText(`![](${relPath})`, state.selection.from)
-                dispatch(tr.scrollIntoView())
-                view.focus()
-              } catch (err) {
-                console.error('Failed to save pasted image:', err)
-              }
-              break
-            }
-          }
-        }
-
-        const handleImageDrop = async (e: DragEvent) => {
-          const files = e.dataTransfer?.files
-          if (!files || files.length === 0) return
-          let handled = false
-          for (let i = 0; i < files.length; i++) {
-            const file = files[i]
-            if (file.type.startsWith('image/')) {
-              if (!handled) {
-                e.preventDefault()
-                e.stopPropagation()
-                handled = true
-              }
-              try {
-                const buffer = await file.arrayBuffer()
-                const relPath = await window.mynote.assets.saveImage(buffer, file.name)
-                // Insert at drop position
-                const dropPos = view.posAtCoords({ left: e.clientX, top: e.clientY })
-                const pos = dropPos?.pos ?? view.state.selection.from
-                const { state, dispatch } = view
-                const tr = state.tr.insertText(`![](${relPath})\n`, pos)
-                dispatch(tr.scrollIntoView())
-                view.focus()
-              } catch (err) {
-                console.error('Failed to save dropped image:', err)
-              }
-            }
-          }
-        }
-
-        pmDom.addEventListener('paste', handleImagePaste)
-        pmDom.addEventListener('dragover', (e) => {
-          if (e.dataTransfer?.types.includes('Files')) {
-            e.preventDefault()
-            e.dataTransfer.dropEffect = 'copy'
-          }
-        })
-        pmDom.addEventListener('drop', handleImageDrop)
       })
       .catch((err) => {
         console.error('Failed to create Milkdown editor:', err)
@@ -667,6 +1005,22 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, r
       if (!editor) return
       // Wikilink navigation: Ctrl/Cmd+click only
       if ((event.ctrlKey || event.metaKey) && handleWikilinkClick(editor, event, onNavigateRef.current)) return
+      // Tag click: navigate to knowledge base with tag filter
+      if (onTagClickRef.current) {
+        const target = event.target
+        if (target instanceof HTMLElement) {
+          const tagEl = target.closest('.md-tag')
+          if (tagEl) {
+            const tagText = normalizeClickedTag(tagEl.textContent ?? '')
+            if (tagText) {
+              event.preventDefault()
+              event.stopPropagation()
+              onTagClickRef.current(tagText)
+              return
+            }
+          }
+        }
+      }
       // Task item click
       if (handleTaskItemClick(editor, event)) return
       closeSlashMenu()

@@ -45,6 +45,13 @@ const api = {
         })
       }
     },
+    onChanged: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('vault:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('vault:changed', handler)
+      }
+    },
   },
 
   // Notes

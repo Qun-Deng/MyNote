@@ -129,8 +129,13 @@ export default function Dashboard() {
   }, [])
 
   const handleOpenNote = async (filePath: string) => {
-    await openNote(filePath)
-    setOpenNotePath(filePath)
+    const opened = await openNote(filePath)
+    if (opened) {
+      setOpenNotePath(filePath)
+    } else {
+      await loadData()
+      await refreshTree()
+    }
   }
 
   const openNewNoteDialog = () => {
@@ -144,8 +149,8 @@ export default function Dashboard() {
     try {
       const meta = await window.mynote.notes.create('notes', title)
       await refreshTree()
-      await openNote(meta.path)
-      setOpenNotePath(meta.path)
+      const opened = await openNote(meta.path)
+      if (opened) setOpenNotePath(meta.path)
       setNewNoteDialogOpen(false)
       setNewNoteTitle('')
       await loadData()
@@ -163,8 +168,8 @@ export default function Dashboard() {
         refreshTree()
       }
       if (diary) {
-        await openNote(diary.path)
-        setOpenNotePath(diary.path)
+        const opened = await openNote(diary.path)
+        if (opened) setOpenNotePath(diary.path)
       }
     } catch {}
   }
@@ -390,7 +395,6 @@ export default function Dashboard() {
             </div>
             {todoItems.length === 0 && !addingTodo ? (
               <div className="text-center py-4">
-                <CheckSquare className="w-8 h-8 text-surface-200 mx-auto mb-2" />
                 <p className="text-xs text-surface-400">今日暂无待办 ✨</p>
               </div>
             ) : (

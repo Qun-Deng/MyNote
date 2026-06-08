@@ -31,6 +31,10 @@ function addRecentlyViewed(filePath: string) {
   saveRecentlyViewed(paths.slice(0, MAX_RECENT))
 }
 
+function isHiddenFolder(path: string) {
+  return path === 'assets' || path.startsWith('assets/')
+}
+
 // ── Sort ──
 
 type SortField = 'updated_at' | 'created_at' | 'title'
@@ -98,6 +102,20 @@ export default function KnowledgeView() {
 
   const openNote = useNoteStore((s) => s.openNote)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
+  const knowledgeTag = useUIStore((s) => s.knowledgeTag)
+  const setKnowledgeTag = useUIStore((s) => s.setKnowledgeTag)
+
+  // Sync global knowledgeTag → local activeTag (from editor #tag click)
+  useEffect(() => {
+    if (knowledgeTag !== null && knowledgeTag !== activeTag) {
+      setActiveTag(knowledgeTag)
+    }
+  }, [knowledgeTag])
+
+  // Sync local activeTag → global
+  useEffect(() => {
+    setKnowledgeTag(activeTag)
+  }, [activeTag])
 
   // Load all notes and tags
   const loadData = useCallback(async () => {
@@ -114,6 +132,14 @@ export default function KnowledgeView() {
   useEffect(() => {
     loadData()
     setRecentlyViewed(loadRecentlyViewed())
+  }, [loadData])
+
+  useEffect(() => {
+    const cleanup = window.mynote.vault.onChanged(() => {
+      void loadData()
+      setRecentlyViewed(loadRecentlyViewed())
+    })
+    return cleanup
   }, [loadData])
 
   // Search
@@ -157,10 +183,14 @@ export default function KnowledgeView() {
   }, [])
 
   const handleOpenNote = async (filePath: string) => {
-    await openNote(filePath)
-    setOpenNotePath(filePath)
-    addRecentlyViewed(filePath)
-    setRecentlyViewed(loadRecentlyViewed())
+    const opened = await openNote(filePath)
+    if (opened) {
+      setOpenNotePath(filePath)
+      addRecentlyViewed(filePath)
+      setRecentlyViewed(loadRecentlyViewed())
+    } else {
+      await loadData()
+    }
   }
 
   // Extract unique folders
@@ -169,7 +199,8 @@ export default function KnowledgeView() {
     for (const note of notes) {
       const parts = note.path.split('/')
       if (parts.length > 1) {
-        set.add(parts.slice(0, -1).join('/'))
+        const folder = parts.slice(0, -1).join('/')
+        if (!isHiddenFolder(folder)) set.add(folder)
       }
     }
     return set
@@ -291,8 +322,8 @@ export default function KnowledgeView() {
     try {
       const meta = await window.mynote.notes.create(newNoteFolder, title)
       await loadData()
-      await openNote(meta.path)
-      setOpenNotePath(meta.path)
+      const opened = await openNote(meta.path)
+      if (opened) setOpenNotePath(meta.path)
       setNewNoteDialogOpen(false)
       setNewNoteTitle('')
     } catch (err) {
