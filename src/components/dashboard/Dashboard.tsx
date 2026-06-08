@@ -15,6 +15,8 @@ export default function Dashboard() {
   const [recentNotes, setRecentNotes] = useState<NoteMeta[]>([])
   const [pendingTodos, setPendingTodos] = useState<TodoItem[]>([])
   const [todayDiary, setTodayDiary] = useState<NoteMeta | null>(null)
+  const [newNoteDialogOpen, setNewNoteDialogOpen] = useState(false)
+  const [newNoteTitle, setNewNoteTitle] = useState('')
 
   const setActiveView = useUIStore((s) => s.setActiveView)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
@@ -45,13 +47,25 @@ export default function Dashboard() {
     setOpenNotePath(filePath)
   }
 
+  const openNewNoteDialog = () => {
+    setNewNoteTitle(`新笔记 ${format(today, 'MM-dd HHmm')}`)
+    setNewNoteDialogOpen(true)
+  }
+
   const handleNewNote = async () => {
+    const title = newNoteTitle.trim()
+    if (!title) return
     try {
-      const meta = await window.mynote.notes.create('notes', `新笔记 ${format(today, 'MM-dd HHmm')}`)
-      refreshTree()
+      const meta = await window.mynote.notes.create('notes', title)
+      await refreshTree()
       await openNote(meta.path)
       setOpenNotePath(meta.path)
-    } catch {}
+      setNewNoteDialogOpen(false)
+      setNewNoteTitle('')
+      await loadData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '新建笔记失败')
+    }
   }
 
   const handleTodayDiary = async () => {
@@ -90,7 +104,7 @@ export default function Dashboard() {
             icon={<FileText className="w-4 h-4" />}
             label="新建笔记"
             color="accent"
-            onClick={handleNewNote}
+            onClick={openNewNoteDialog}
           />
           <QuickCard
             icon={<CalendarDays className="w-4 h-4" />}
@@ -234,6 +248,47 @@ export default function Dashboard() {
           </section>
         </div>
       </div>
+
+      {newNoteDialogOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 px-4"
+          onClick={() => setNewNoteDialogOpen(false)}
+        >
+          <div
+            className="w-80 rounded-lg border border-surface-200 bg-white p-4 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-surface-800">新建笔记</h3>
+            <input
+              autoFocus
+              value={newNoteTitle}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setNewNoteTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleNewNote()
+                if (event.key === 'Escape') setNewNoteDialogOpen(false)
+              }}
+              placeholder="笔记名称"
+              className="mt-3 w-full rounded-md border border-surface-300 px-3 py-2 text-sm outline-none focus:border-accent-400"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setNewNoteDialogOpen(false)}
+                className="rounded-md px-3 py-1.5 text-sm text-surface-500 hover:bg-surface-100"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleNewNote}
+                disabled={!newNoteTitle.trim()}
+                className="rounded-md bg-accent-600 px-3 py-1.5 text-sm text-white hover:bg-accent-700 disabled:opacity-40"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

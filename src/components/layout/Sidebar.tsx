@@ -58,11 +58,14 @@ function getTitleFromMarkdownPath(filePath: string) {
 }
 
 function replaceMarkdownTitle(content: string, title: string) {
+  const frontmatter = content.match(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/)
+  const prefix = frontmatter?.[0] ?? ''
+  const body = prefix ? content.slice(prefix.length) : content
   const nextTitle = `# ${title}`
-  if (/^#\s+.*$/m.test(content)) {
-    return content.replace(/^#\s+.*$/m, nextTitle)
-  }
-  return `${nextTitle}\n\n${content.trimStart()}`
+  const nextBody = /^#\s+.*$/m.test(body)
+    ? body.replace(/^#\s+.*$/m, nextTitle)
+    : `${nextTitle}\n\n${body.trimStart()}`
+  return `${prefix}${prefix && !nextBody.startsWith('\n') ? '\n' : ''}${nextBody}`
 }
 
 async function runFileAction(action: () => Promise<void>) {
@@ -413,11 +416,11 @@ export default function Sidebar() {
       {fileDialog && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 px-4"
-          onMouseDown={closeFileDialog}
+          onClick={closeFileDialog}
         >
           <div
             className="w-80 rounded-lg border border-surface-200 bg-white p-4 shadow-xl"
-            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-surface-800">
               {fileDialog.mode === 'new-note'
@@ -429,6 +432,7 @@ export default function Sidebar() {
             <input
               autoFocus
               value={fileDialogValue}
+              onFocus={(e) => e.currentTarget.select()}
               onChange={(e) => setFileDialogValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitFileDialog()

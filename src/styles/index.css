@@ -103,7 +103,7 @@
   }
 
   .milkdown {
-    @apply prose prose-slate max-w-none;
+    @apply max-w-none;
   }
 }
 
