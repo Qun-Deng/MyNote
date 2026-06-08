@@ -11,6 +11,10 @@
     "electron:build": "vite build && electron-builder"
   },
   "dependencies": {
+    "@milkdown/kit": "^7.21.2",
+    "@milkdown/plugin-emoji": "^7.21.2",
+    "@milkdown/plugin-prism": "^7.21.2",
+    "@milkdown/theme-nord": "^7.21.2",
     "date-fns": "^4.0.0",
     "lucide-react": "^0.400.0",
     "react": "^18.3.1",

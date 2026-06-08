@@ -1,0 +1,163 @@
+/* ====== Milkdown Editor Styles ====== */
+
+.milkdown-editor-container {
+  color: #1e293b;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.milkdown-editor-container .editor {
+  outline: none;
+  min-height: 100%;
+}
+
+/* Headings */
+.milkdown-editor-container h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin: 1em 0 0.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.milkdown-editor-container h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+}
+
+.milkdown-editor-container h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+}
+
+.milkdown-editor-container h4 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+
+/* Paragraphs */
+.milkdown-editor-container p {
+  margin: 0.5em 0;
+}
+
+/* Lists */
+.milkdown-editor-container ul,
+.milkdown-editor-container ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.milkdown-editor-container li {
+  margin: 0.25em 0;
+}
+
+/* Task list */
+.milkdown-editor-container li[data-checked="true"] {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+/* Code */
+.milkdown-editor-container code {
+  background: #f1f5f9;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.milkdown-editor-container pre {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 1em 1.2em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+
+.milkdown-editor-container pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.875em;
+}
+
+/* Blockquote */
+.milkdown-editor-container blockquote {
+  border-left: 3px solid #3b82f6;
+  padding-left: 1em;
+  margin: 0.8em 0;
+  color: #64748b;
+}
+
+/* Table */
+.milkdown-editor-container table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+
+.milkdown-editor-container th,
+.milkdown-editor-container td {
+  border: 1px solid #e2e8f0;
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.milkdown-editor-container th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+/* Horizontal rule */
+.milkdown-editor-container hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.5em 0;
+}
+
+/* Links */
+.milkdown-editor-container a {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+/* Images */
+.milkdown-editor-container img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.8em 0;
+}
+
+/* Bold / Italic */
+.milkdown-editor-container strong {
+  font-weight: 600;
+}
+
+.milkdown-editor-container em {
+  font-style: italic;
+}
+
+/* Selection */
+.milkdown-editor-container ::selection {
+  background: #bfdbfe;
+}
+
+/* Strikethrough */
+.milkdown-editor-container del,
+.milkdown-editor-container s {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+/* Placeholder */
+.milkdown-editor-container .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #94a3b8;
+  pointer-events: none;
+  height: 0;
+}

@@ -1,5 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'path'
+import { setVaultPath, getVaultPath, registerNotesIPC } from './ipc/notes'
+import { registerDiaryIPC } from './ipc/diary'
+import { registerTodosIPC } from './ipc/todos'
+import { registerSearchIPC } from './ipc/search'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -68,6 +72,59 @@ ipcMain.handle('window:is-maximized', () => {
   return mainWindow?.isMaximized() ?? false
 })
 
+// ====== IPC: Vault Selection ======
+
+ipcMain.handle('vault:select', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: '选择笔记仓库 (Vault)',
+  })
+  if (!result.canceled && result.filePaths.length > 0) {
+    setVaultPath(result.filePaths[0])
+    return result.filePaths[0]
+  }
+  return null
+})
+
+ipcMain.handle('vault:get-path', () => {
+  return getVaultPath()
+})
+
+ipcMain.handle('vault:init', (_event, newVaultPath: string) => {
+  setVaultPath(newVaultPath)
+  // Create basic directory structure
+  const fs = require('fs')
+  const dirs = ['notes', 'diary', 'assets']
+  for (const dir of dirs) {
+    const dirPath = path.join(newVaultPath, dir)
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true })
+    }
+  }
+})
+
+ipcMain.handle('vault:move', async (_event, from: string, to: string) => {
+  const vaultPath = getVaultPath()
+  if (!vaultPath) throw new Error('Vault not initialized')
+  const fromFull = path.join(vaultPath, from)
+  const toFull = path.join(vaultPath, to)
+  const fs = require('fs')
+  if (fs.existsSync(fromFull)) {
+    const dir = path.dirname(toFull)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.renameSync(fromFull, toFull)
+  }
+})
+
+// ====== Register IPC Handlers ======
+
+registerNotesIPC()
+registerDiaryIPC()
+registerTodosIPC()
+registerSearchIPC()
+
 // ====== App Lifecycle ======
 
 app.whenReady().then(() => {
@@ -84,29 +141,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
-})
-
-// ====== IPC: Vault Selection ======
-
-let vaultPath: string | null = null
-
-ipcMain.handle('vault:select', async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ['openDirectory'],
-    title: '选择笔记仓库 (Vault)',
-  })
-  if (!result.canceled && result.filePaths.length > 0) {
-    vaultPath = result.filePaths[0]
-    return vaultPath
-  }
-  return null
-})
-
-ipcMain.handle('vault:get-path', () => {
-  return vaultPath
-})
-
-ipcMain.handle('vault:init', (_event, newVaultPath: string) => {
-  vaultPath = newVaultPath
-  // TODO: Initialize SQLite DB, create directory structure
 })
