@@ -81,8 +81,7 @@ pub fn run() {
             commands::git::git_pull,
             commands::git::git_push,
             // Export
-            commands::export::export_pdf,
-            commands::export::export_markdown_to_html,
+            commands::export::export_html_to_pdf,
             // Assets & PDF
             commands::assets::assets_save_image,
             commands::assets::assets_read_data_url,

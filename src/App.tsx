@@ -34,6 +34,10 @@ function renamePathByTitle(filePath: string, title: string) {
   return parts.join('/')
 }
 
+function htmlEscape(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 function splitStandardFrontmatter(markdown: string) {
   const frontmatter = markdown.match(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/)
   if (!frontmatter) return { frontmatter: '', body: markdown }
@@ -354,18 +358,36 @@ function App() {
   const isEditing = !!(openNotePath && currentMeta)
   const hasTabs = tabs.length > 0
 
-  const submitTitleRename = useCallback(() => {
+  const submitTitleRename = useCallback(async () => {
     if (!currentMeta) return
     const nextTitle = titleDraft.trim()
-    if (!nextTitle) return
-    if (nextTitle !== currentMeta.title) {
-      const nextContent = replaceMarkdownTitle(currentContent, nextTitle)
-      setContent(nextContent)
-      updateCurrentMeta({ title: nextTitle })
-      setEditorRevision((revision) => revision + 1)
+    if (!nextTitle || nextTitle === currentMeta.title) {
+      setRenamingTitle(false)
+      return
     }
+
+    const nextPath = renamePathByTitle(currentMeta.path, nextTitle)
+
+    try {
+      // Flush pending saves to old path first
+      await flush()
+      // Rename file on disk
+      const normalizedPath = await window.mynote.notes.rename(currentMeta.path, nextPath)
+      // Update markdown content with new title
+      const nextContent = replaceMarkdownTitle(currentContent, nextTitle)
+      // Write updated content to the renamed file
+      await window.mynote.notes.write(normalizedPath, nextContent)
+      // Update in-memory state
+      setContent(nextContent)
+      updateCurrentMeta({ path: normalizedPath, title: nextTitle })
+      setEditorRevision((revision) => revision + 1)
+      refreshTree()
+    } catch (err) {
+      console.error('Rename failed:', err)
+    }
+
     setRenamingTitle(false)
-  }, [currentContent, currentMeta, setContent, titleDraft, updateCurrentMeta])
+  }, [currentContent, currentMeta, setContent, titleDraft, updateCurrentMeta, flush, refreshTree])
 
   useEffect(() => {
     setTitleDraft(currentMeta?.title ?? '')
@@ -514,9 +536,87 @@ function App() {
                 <button
                   onClick={async () => {
                     try {
-                      const r = await window.mynote.export.pdf(currentContent, currentMeta.title)
-                      if (r.success) alert(`已导出: ${r.output}`)
-                      else if (r.output !== 'Cancelled') alert(`导出失败: ${r.output}`)
+                      // 1. Resolve vault asset images to base64 data URLs
+                      const assetRe = /!\[([^\]]*)\]\(([^)]+)\)/g
+                      let resolvedMd = currentContent
+                      const promises: Promise<void>[] = []
+                      for (const match of currentContent.matchAll(assetRe)) {
+                        const url = match[2]
+                        const normalized = url.replace(/\\/g, '/').replace(/^\.\//, '')
+                        if (normalized.startsWith('assets/')) {
+                          promises.push(
+                            window.mynote.assets.readDataUrl(normalized).then(dataUrl => {
+                              resolvedMd = resolvedMd.replace(url, dataUrl)
+                            }).catch(() => {})
+                          )
+                        }
+                      }
+                      await Promise.all(promises)
+
+                      // 2. Convert markdown → HTML using marked
+                      const { marked } = await import('marked')
+                      const body = marked.parse(resolvedMd) as string
+
+                      // 3. Build complete HTML document
+                      const title = htmlEscape(currentMeta.title)
+                      const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title></title>
+<style>
+  @page { margin: 2.2cm; size: A4; }
+  @page { @top-left     { content: none; } }
+  @page { @top-center   { content: none; } }
+  @page { @top-right    { content: none; } }
+  @page { @bottom-left  { content: none; } }
+  @page { @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #8a9097; } }
+  @page { @bottom-right { content: none; } }
+  body {
+    font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Microsoft YaHei", Georgia, serif;
+    font-size: 14px; line-height: 1.92; color: #24272b;
+    max-width: 760px; margin: 0 auto; padding: 0;
+  }
+  h1 { font-size: 2em; font-weight: 650; margin: 0 0 0.8em; border-bottom: 1px solid #dfe4e1; }
+  h2 { font-size: 1.45em; margin: 1.6em 0 0.6em; }
+  h3 { font-size: 1.2em; margin: 1.3em 0 0.5em; }
+  h4 { font-size: 1em; color: #8a9097; text-transform: uppercase; letter-spacing: 0.08em; }
+  h5 { font-size: 0.9em; color: #8a9097; text-transform: uppercase; letter-spacing: 0.08em; }
+  h6 { font-size: 0.82em; color: #8a9097; text-transform: uppercase; letter-spacing: 0.08em; }
+  p { margin: 0.8em 0; }
+  a { color: #3b82f6; text-decoration: none; }
+  code { font-family: "JetBrains Mono", "Consolas", monospace; font-size: 0.88em; padding: 0.12em 0.38em; background: #f2f5f4; border-radius: 4px; }
+  pre { margin: 1.2em 0; padding: 1em; background: #202326; color: #eef2f2; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+  pre code { padding: 0; background: transparent; color: inherit; }
+  blockquote { margin: 0.9em 0; padding: 0.08em 0 0.08em 1.4em; border-left: 3px solid #aeb8b4; color: #464a50; font-style: italic; }
+  blockquote p { margin: 0.4em 0; }
+  ul, ol { margin: 0.8em 0; padding-left: 1.65em; }
+  li { margin: 0.3em 0; }
+  hr { height: 1px; margin: 2em 0; border: 0; background: linear-gradient(90deg, transparent, #dfe4e1 16%, #dfe4e1 84%, transparent); }
+  table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+  th, td { border: 1px solid #dfe4e1; padding: 0.55em 0.75em; text-align: left; }
+  th { background: #f6f8f7; font-weight: 600; }
+  img { display: block; max-width: 100%; height: auto; margin: 1.5em auto; border-radius: 6px; }
+  input[type="checkbox"] { margin-right: 0.4em; }
+  del { text-decoration: line-through; color: #8a9097; }
+  strong { font-weight: 600; }
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`
+
+                      // 4. Send to backend for PDF generation
+                      const r = await window.mynote.export.htmlToPdf(html, currentMeta.title)
+                      if (r.success) {
+                        if (confirm(`PDF 已导出: ${r.output}\n\n是否打开所在文件夹？`)) {
+                          const dir = r.output.replace(/[/\\][^/\\]*$/, '')
+                          await window.mynote.vault.openInExplorer(dir)
+                        }
+                      } else {
+                        alert(`导出失败: ${r.output}`)
+                      }
                     } catch { alert('导出失败') }
                   }}
                   className="text-xs text-surface-500 hover:text-accent-600 font-medium px-2 py-1 rounded hover:bg-surface-100 transition-colors ml-auto"
