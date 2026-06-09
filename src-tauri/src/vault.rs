@@ -130,8 +130,8 @@ pub fn extract_tags(content: &str) -> Vec<String> {
         .replace_all(&body, "")
         .to_string();
 
-    // Bracket tags: \[#tag\]
-    let bracket_re = Regex::new(r#"\\?\[#([^\]\\#]+)\\]"#).unwrap();
+    // Bracket tags: [#tag] or escaped \[#tag\]
+    let bracket_re = Regex::new(r#"\\?\[#([^\]\\#\s]+)\]"#).unwrap();
     for cap in bracket_re.captures_iter(&body) {
         let t = normalize_tag(cap.get(1).map(|m| m.as_str()).unwrap_or(""));
         if !t.is_empty() && !tags.contains(&t) {
@@ -144,15 +144,6 @@ pub fn extract_tags(content: &str) -> Vec<String> {
     for cap in decl_re.captures_iter(&body) {
         if let Some(val) = cap.get(1) {
             add_tags_from_value(&mut tags, val.as_str());
-        }
-    }
-
-    // Inline #tag: match optional-backslash-prefixed #tagname
-    let inline_re = Regex::new(r"(^|\s|[(\[{])(?:\\\\)?#([^\s#\\\[\]]+)").unwrap();
-    for cap in inline_re.captures_iter(&body) {
-        let t = normalize_tag(cap.get(2).map(|m| m.as_str()).unwrap_or(""));
-        if !t.is_empty() && !tags.contains(&t) {
-            tags.push(t);
         }
     }
 

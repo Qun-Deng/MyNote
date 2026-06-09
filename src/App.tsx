@@ -102,9 +102,10 @@ function extractMarkdownTags(content: string) {
   const declarationLines = body.matchAll(/^\s*(?:tags|标签)\s*[:：]\s*(.+)$/gim)
   for (const match of declarationLines) addMarkdownTagsFromValue(tags, match[1])
 
-  const matches = body.matchAll(/(^|[\s([{])\\?#([^\s#\\\]]+)/g)
-  for (const match of matches) {
-    addMarkdownTag(tags, match[2])
+  // Bracket tags: [#tag]
+  const bracketMatches = body.matchAll(/\\?\[#([^\]#\\\s]+)\]/g)
+  for (const match of bracketMatches) {
+    addMarkdownTag(tags, match[1])
   }
   return tags
 }
