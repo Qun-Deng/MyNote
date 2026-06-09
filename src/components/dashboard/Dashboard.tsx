@@ -1,4 +1,4 @@
-import { CalendarDays, CheckSquare, FileText, Plus, Clock, Trash2, Check, Square, Image } from 'lucide-react'
+import { CalendarDays, CheckSquare, FileText, Plus, Trash2, Check, Square, Image } from 'lucide-react'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useEffect, useState, useRef, useCallback } from 'react'
@@ -287,47 +287,23 @@ export default function Dashboard() {
             </button>
           </div>
           {recentNotes.length === 0 ? (
-            <div className="grid grid-cols-2 gap-3">
-              <EmptyCard
-                icon={<FileText className="w-8 h-8 text-surface-300" />}
-                text="还没有笔记，点击上方按钮创建你的第一篇笔记"
-              />
-              <EmptyCard
-                icon={<FileText className="w-8 h-8 text-surface-300" />}
-                text="笔记会在这里显示"
-              />
+            <div className="text-center py-6 text-sm text-surface-400">
+              还没有笔记，点击上方「新建笔记」开始
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {recentNotes.slice(0, 6).map((note) => (
+            <div className="grid grid-cols-2 gap-2.5">
+              {recentNotes.slice(0, 4).map((note) => (
                 <button
                   key={note.path}
                   onClick={() => handleOpenNote(note.path)}
-                  className="card text-left hover:border-accent-200 hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+                  className="card text-left hover:border-accent-200 hover:shadow-sm transition-all duration-200 py-3 px-4"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-accent-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <FileText className="w-4 h-4 text-accent-500" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-sm font-semibold text-surface-800 truncate">
-                        {note.title}
-                      </h3>
-                      <p className="text-xs text-surface-400 mt-1 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {format(new Date(note.updated_at), 'MM-dd HH:mm')}
-                      </p>
-                      {note.tags.length > 0 && (
-                        <div className="flex gap-1 mt-2 flex-wrap">
-                          {note.tags.map((tag) => (
-                            <span key={tag} className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <h3 className="text-sm font-medium text-surface-800 truncate">
+                    {note.title}
+                  </h3>
+                  <p className="text-xs text-surface-400 mt-1">
+                    {format(new Date(note.updated_at), 'yyyy-MM-dd HH:mm')}
+                  </p>
                 </button>
               ))}
             </div>
