@@ -566,12 +566,12 @@ function App() {
 <title></title>
 <style>
   @page { margin: 2.2cm; size: A4; }
-  @page { @top-left     { content: none; } }
-  @page { @top-center   { content: none; } }
-  @page { @top-right    { content: none; } }
-  @page { @bottom-left  { content: none; } }
+  @page { @top-left     { content: ""; } }
+  @page { @top-center   { content: ""; } }
+  @page { @top-right    { content: ""; } }
+  @page { @bottom-left  { content: ""; } }
   @page { @bottom-center { content: counter(page) " / " counter(pages); font-size: 9pt; color: #8a9097; } }
-  @page { @bottom-right { content: none; } }
+  @page { @bottom-right { content: ""; } }
   body {
     font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Microsoft YaHei", Georgia, serif;
     font-size: 14px; line-height: 1.92; color: #24272b;
