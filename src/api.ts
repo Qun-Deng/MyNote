@@ -179,19 +179,11 @@ const gitApi = {
 // ── Export ──
 
 const exportApi = {
-  pdf: async (markdown: string, title: string) => {
+  /** Export pre-rendered HTML to PDF. Frontend handles markdown→HTML conversion. */
+  htmlToPdf: async (html: string, title: string) => {
     try {
-      // Generate HTML via Rust
-      const html = await invoke<string>('export_markdown_to_html', { markdown, title })
-      // Open print dialog via browser
-      const printWindow = window.open('', '_blank', 'width=800,height=600')
-      if (printWindow) {
-        printWindow.document.write(html)
-        printWindow.document.close()
-        printWindow.focus()
-        printWindow.print()
-      }
-      return { success: true, output: 'Sent to printer' }
+      const result = await invoke<{ success: boolean; output: string }>('export_html_to_pdf', { html, title })
+      return result
     } catch (err) {
       return { success: false, output: String(err) }
     }
@@ -212,6 +204,7 @@ const pdfApi = {
 const assetsApi = {
   saveImage: (buffer: ArrayBuffer, filename: string) =>
     invoke<string>('assets_save_image', { buffer: Array.from(new Uint8Array(buffer)), filename }),
+  readDataUrl: (relPath: string) => invoke<string>('assets_read_data_url', { relPath }),
 }
 
 // ── Combined API ──

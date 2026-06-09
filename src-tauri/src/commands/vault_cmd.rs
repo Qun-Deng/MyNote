@@ -214,7 +214,13 @@ pub fn vault_open_in_explorer(state: State<AppState>, item_path: String) -> Resu
         None => return Err("Vault not initialized".into()),
     };
 
-    let full_path = PathBuf::from(&vp).join(&item_path);
+    // Support both absolute paths (e.g. export output) and vault-relative paths
+    let p = std::path::Path::new(&item_path);
+    let full_path = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        PathBuf::from(&vp).join(&item_path)
+    };
 
     #[cfg(target_os = "windows")]
     {

@@ -645,16 +645,11 @@ export function setEditorVaultPath(path: string | null) {
   globalVaultPath = path
 }
 
-function assetSrcForEditor(src: string) {
+function assetSrcForEditor(src: string): string {
   const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '')
   if (!normalized.startsWith('assets/')) return src
-  if (globalVaultPath) {
-    const absPath = `${globalVaultPath.replace(/\\/g, '/').replace(/\/$/, '')}/${normalized}`
-    // On Windows, convert C:\... to https://asset.localhost/C:/...
-    return `https://asset.localhost/${absPath}`
-  }
-  // Fallback — won't render asset but won't crash
-  return src
+  // Return placeholder — real src loaded async via assets.readDataUrl
+  return ''
 }
 
 const imageViewProsePlugin = new Plugin({
@@ -666,11 +661,20 @@ const imageViewProsePlugin = new Plugin({
           const src = String(imageNode.attrs.src ?? '')
           const alt = String(imageNode.attrs.alt ?? '')
           const title = imageNode.attrs.title ? String(imageNode.attrs.title) : ''
-          dom.src = assetSrcForEditor(src)
           dom.alt = alt
           if (title) dom.title = title
           else dom.removeAttribute('title')
           dom.dataset.mdSrc = src
+          // Load vault asset images as base64 data URLs
+          const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '')
+          if (normalized.startsWith('assets/')) {
+            dom.src = ''
+            window.mynote.assets.readDataUrl(normalized).then(dataUrl => {
+              if (dom.dataset.mdSrc === src) dom.src = dataUrl
+            }).catch(() => {})
+          } else {
+            dom.src = src
+          }
         }
         updateDom(node)
         return {
