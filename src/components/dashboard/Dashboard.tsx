@@ -106,19 +106,28 @@ export default function Dashboard() {
     }
   }
 
+  const todayStr = format(today, 'yyyy-MM-dd')
+
+  const syncDiary = async () => {
+    try { await window.mynote.diary.syncFromPage(todayStr) } catch {}
+  }
+
   const handleTodoToggle = async (item: TodoPageItem) => {
     await window.mynote.todoPage.toggle(item.id)
+    await syncDiary()
     loadData()
   }
 
   const handleTodoDelete = async (item: TodoPageItem) => {
     await window.mynote.todoPage.delete(item.id)
+    await syncDiary()
     loadData()
   }
 
   const handleTodoAdd = async () => {
     if (!newTodoContent.trim()) return
     await window.mynote.todoPage.add(newTodoContent.trim(), 'today')
+    await syncDiary()
     setNewTodoContent('')
     setAddingTodo(false)
     loadData()
@@ -371,7 +380,7 @@ export default function Dashboard() {
             </div>
             {todoItems.length === 0 && !addingTodo ? (
               <div className="text-center py-4">
-                <p className="text-xs text-surface-400">今日暂无待办 ✨</p>
+                <p className="text-xs text-surface-400">今日暂无待办</p>
               </div>
             ) : (
               <div>

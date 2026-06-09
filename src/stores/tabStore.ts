@@ -17,6 +17,7 @@ interface TabState {
 
   openTab: (path: string, title: string, content?: string) => void
   closeTab: (path: string) => void
+  updateTabPath: (oldPath: string, newPath: string, title: string) => void
   setActiveTab: (path: string) => void
   updateTabTitle: (path: string, title: string) => void
   cacheContent: (path: string, content: string, dirty: boolean) => void
@@ -70,6 +71,22 @@ export const useTabStore = create<TabState>((set, get) => ({
       }
     }
 
+    set({
+      tabs: newTabs,
+      activeTabPath: newActive,
+      contentCache: newCache,
+    })
+  },
+
+  updateTabPath: (oldPath, newPath, title) => {
+    const { tabs, activeTabPath, contentCache } = get()
+    const newTabs = tabs.map(t => t.path === oldPath ? { path: newPath, title } : t)
+    const newActive = activeTabPath === oldPath ? newPath : activeTabPath
+    const newCache = { ...contentCache }
+    if (contentCache[oldPath]) {
+      newCache[newPath] = contentCache[oldPath]
+      delete newCache[oldPath]
+    }
     set({
       tabs: newTabs,
       activeTabPath: newActive,

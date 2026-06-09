@@ -131,6 +131,7 @@ function App() {
   const activeTabPath = useTabStore((s) => s.activeTabPath)
   const openTab = useTabStore((s) => s.openTab)
   const closeTab = useTabStore((s) => s.closeTab)
+  const updateTabPath = useTabStore((s) => s.updateTabPath)
   const setActiveTab = useTabStore((s) => s.setActiveTab)
   const updateTabTitle = useTabStore((s) => s.updateTabTitle)
   const cacheContent = useTabStore((s) => s.cacheContent)
@@ -219,34 +220,20 @@ function App() {
   // Auto-save logic
   const handleSave = useCallback(
     async (filePath: string, content: string) => {
-      let savedPath = filePath
       await window.mynote.notes.write(filePath, content)
       const tags = extractMarkdownTags(content)
       const title = extractMarkdownTitle(content)
       if (title && currentMeta && !currentMeta.is_diary) {
-        const newPath = renamePathByTitle(filePath, title)
-        if (newPath !== filePath) {
-          try {
-            const normalizedPath = await window.mynote.notes.rename(filePath, newPath)
-            savedPath = normalizedPath
-            setOpenNotePath(normalizedPath)
-            updateCurrentMeta({ path: normalizedPath, title, tags })
-            // Update tab path reference
-            closeTab(filePath)
-            openTab(normalizedPath, title)
-            await refreshTree()
-          } catch (err) {
-            console.error('Failed to rename note from title:', err)
-          }
-        } else if (title !== currentMeta.title || tags.join('\0') !== currentMeta.tags.join('\0')) {
+        if (title !== currentMeta.title || tags.join('\0') !== currentMeta.tags.join('\0')) {
           updateCurrentMeta({ title, tags })
         }
       } else if (currentMeta && tags.join('\0') !== currentMeta.tags.join('\0')) {
         updateCurrentMeta({ tags })
       }
-      try {
-        await window.mynote.todos.extract(savedPath, content)
-      } catch {}
+      // Sync diary [待办事项] to todoPage on save
+      if (currentMeta?.is_diary && currentMeta?.diary_date) {
+        try { await window.mynote.diary.syncToPage(currentMeta.diary_date) } catch {}
+      }
     },
     [currentMeta, refreshTree, setOpenNotePath, updateCurrentMeta, closeTab, openTab]
   )

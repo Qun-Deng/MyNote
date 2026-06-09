@@ -58,24 +58,24 @@ export default function OutlineSidebar({ content, onJumpToHeading }: OutlineSide
   }
 
   const handleClick = (heading: Heading) => {
-    // Find the heading element in the editor DOM and scroll to it
     const editor = document.querySelector('.ProseMirror')
     if (!editor) return
 
-    // Try finding by heading ID (milkdown generates IDs like h-n)
-    // Also try matching by text content
+    // Normalize: strip Milkdown backslash escapes for comparison
+    const targetText = heading.text.replace(/\\([[\]])/g, '$1').trim()
+
     const headings = editor.querySelectorAll('h1, h2, h3, h4, h5, h6')
     for (const h of headings) {
-      if (h.textContent?.trim() === heading.text) {
+      const domText = (h.textContent ?? '').replace(/\\([[\]])/g, '$1').trim()
+      if (domText === targetText || domText.includes(targetText)) {
         h.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        // Highlight briefly
         h.classList.add('outline-highlight')
         setTimeout(() => h.classList.remove('outline-highlight'), 1500)
         return
       }
     }
 
-    // Fallback: notify parent to use custom jump logic
+    // Fallback: try finding by line index via position
     onJumpToHeading?.(heading.line)
   }
 

@@ -204,6 +204,64 @@ pub fn vault_delete_item(state: State<AppState>, item_path: String) -> Result<()
     Ok(())
 }
 
+// ── vault_open_in_explorer ──
+
+#[tauri::command]
+pub fn vault_open_in_explorer(state: State<AppState>, item_path: String) -> Result<(), String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Err("Vault not initialized".into()),
+    };
+
+    let full_path = PathBuf::from(&vp).join(&item_path);
+
+    #[cfg(target_os = "windows")]
+    {
+        // Normalize separators to backslashes for Explorer
+        let path_str = full_path.to_string_lossy().replace('/', "\\");
+        if full_path.is_dir() {
+            std::process::Command::new("explorer")
+                .arg(&*path_str)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer")
+                .arg("/select,")
+                .arg(&*path_str)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if full_path.is_dir() {
+            std::process::Command::new("open")
+                .arg(full_path.to_string_lossy().as_ref())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(full_path.to_string_lossy().as_ref())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let parent = full_path.parent().unwrap_or(&full_path);
+        std::process::Command::new("xdg-open")
+            .arg(parent.to_string_lossy().as_ref())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 // ── Vault Watcher ──
 
 fn start_vault_watcher(app: tauri::AppHandle, vault_root: String) {

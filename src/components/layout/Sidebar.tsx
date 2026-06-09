@@ -102,8 +102,10 @@ export default function Sidebar() {
   const [fileDialogValue, setFileDialogValue] = useState('')
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodePath: string; nodeType: 'file' | 'directory' } | null>(null)
   const plusRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const ctxMenuRef = useRef<HTMLDivElement>(null)
 
   const openFileDialog = useCallback((mode: FileDialogMode, targetPath: string, initialValue = '') => {
     setPlusMenuOpen(false)
@@ -277,13 +279,34 @@ export default function Sidebar() {
   const handleContextMenu = (e: React.MouseEvent, nodePath: string, nodeType: 'file' | 'directory') => {
     e.preventDefault()
     e.stopPropagation()
-    window.mynote.vault.showContextMenu(nodePath, nodeType)
+    setCtxMenu({ x: e.clientX, y: e.clientY, nodePath, nodeType })
   }
 
   const handleRootContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    window.mynote.vault.showContextMenu('', 'directory')
+    setCtxMenu({ x: e.clientX, y: e.clientY, nodePath: '', nodeType: 'directory' })
   }
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), [])
+
+  // Close context menu on outside click / Escape
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = (e: MouseEvent) => {
+      if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target as Node)) {
+        closeCtxMenu()
+      }
+    }
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeCtxMenu()
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('keydown', keyHandler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', keyHandler)
+    }
+  }, [ctxMenu, closeCtxMenu])
 
   const handleRootDragOver = (e: React.DragEvent) => {
     if (!e.dataTransfer.types.includes('text/plain')) return
@@ -484,6 +507,149 @@ export default function Sidebar() {
           )}
         </button>
       </div>
+
+      {/* Context Menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxMenuRef}
+          className="fixed z-[200] w-40 bg-white border border-surface-200 rounded-md shadow-lg py-1"
+          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 170), top: Math.min(ctxMenu.y, window.innerHeight - 200) }}
+        >
+          {ctxMenu.nodeType === 'file' ? (
+            <>
+              <button
+                onClick={() => { handleOpenNote(ctxMenu.nodePath); closeCtxMenu() }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5 text-surface-400" />
+                打开
+              </button>
+              <button
+                onClick={() => { startInlineRename(ctxMenu.nodePath); closeCtxMenu() }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5 text-surface-400" />
+                重命名
+              </button>
+              <div className="border-t border-surface-100 my-1" />
+              <button
+                onClick={() => {
+                  closeCtxMenu()
+                  window.mynote.vault.openInExplorer(ctxMenu.nodePath)
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-surface-400" />
+                在资源管理器中打开
+              </button>
+              <button
+                onClick={() => {
+                  closeCtxMenu()
+                  const absPath = vaultPath ? `${vaultPath.replace(/\\/g, '/')}/${ctxMenu.nodePath}` : ctxMenu.nodePath
+                  navigator.clipboard.writeText(absPath).catch(() => {})
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 text-surface-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                复制绝对路径
+              </button>
+              <div className="border-t border-surface-100 my-1" />
+              <button
+                onClick={() => {
+                  closeCtxMenu()
+                  if (confirm(`确定删除 "${ctxMenu.nodePath.split('/').pop()}" 吗？此操作不可撤销。`)) {
+                    runFileAction(async () => {
+                      await window.mynote.vault.deleteItem(ctxMenu.nodePath)
+                      await refreshTree()
+                    })
+                  }
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                删除
+              </button>
+            </>
+          ) : (
+            <>
+              {ctxMenu.nodePath !== '' && (
+                <>
+                  <button
+                    onClick={() => { startInlineRename(ctxMenu.nodePath); closeCtxMenu() }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-surface-400" />
+                    重命名
+                  </button>
+                  <div className="border-t border-surface-100 my-1" />
+                </>
+              )}
+              <button
+                onClick={() => { closeCtxMenu(); handleNewNote(ctxMenu.nodePath || 'notes') }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <FilePlus className="w-3.5 h-3.5 text-surface-400" />
+                新建笔记
+              </button>
+              <button
+                onClick={() => { closeCtxMenu(); handleNewFolder(ctxMenu.nodePath) }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <FolderPlus className="w-3.5 h-3.5 text-surface-400" />
+                新建文件夹
+              </button>
+              <div className="border-t border-surface-100 my-1" />
+              <button
+                onClick={() => {
+                  closeCtxMenu()
+                  window.mynote.vault.openInExplorer(ctxMenu.nodePath || '')
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-surface-400" />
+                打开文件资源管理器
+              </button>
+              <button
+                onClick={() => {
+                  closeCtxMenu()
+                  const absPath = ctxMenu.nodePath ? `${vaultPath?.replace(/\\/g, '/')}/${ctxMenu.nodePath}` : (vaultPath || '')
+                  navigator.clipboard.writeText(absPath).catch(() => {})
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-surface-700 hover:bg-surface-50 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 text-surface-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                复制绝对路径
+              </button>
+              {ctxMenu.nodePath !== '' && (
+                <>
+                  <div className="border-t border-surface-100 my-1" />
+                  <button
+                    onClick={() => {
+                      closeCtxMenu()
+                      if (confirm(`确定删除 "${ctxMenu.nodePath.split('/').pop()}" 及其所有内容吗？此操作不可撤销。`)) {
+                        runFileAction(async () => {
+                          await window.mynote.vault.deleteItem(ctxMenu.nodePath)
+                          await refreshTree()
+                        })
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    删除
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

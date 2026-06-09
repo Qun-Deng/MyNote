@@ -81,8 +81,19 @@ export default function TodoView() {
     loadItems()
   }, [loadItems])
 
+  const todayStr = fmtISODate(new Date())
+
+  const syncDiaryIfToday = async (section: string) => {
+    if (section === 'today') {
+      try { await window.mynote.diary.syncFromPage(todayStr) } catch {}
+    }
+  }
+
   const handleToggle = async (item: TodoPageItem) => {
     await window.mynote.todoPage.toggle(item.id)
+    if (item.section === 'today') {
+      try { await window.mynote.diary.syncFromPage(todayStr) } catch {}
+    }
     setItems((prev) =>
       prev.map((t) => (t.id === item.id ? { ...t, completed: !t.completed } : t))
     )
@@ -90,6 +101,9 @@ export default function TodoView() {
 
   const handleDelete = async (item: TodoPageItem) => {
     await window.mynote.todoPage.delete(item.id)
+    if (item.section === 'today') {
+      try { await window.mynote.diary.syncFromPage(todayStr) } catch {}
+    }
     setItems((prev) => prev.filter((t) => t.id !== item.id))
   }
 
@@ -97,6 +111,7 @@ export default function TodoView() {
     if (!newContent.trim()) return
     try {
       const created = await window.mynote.todoPage.add(newContent.trim(), section)
+      await syncDiaryIfToday(section)
       setNewContent('')
       setAddingSection(null)
       setItems((prev) => [...prev, created])
@@ -315,7 +330,7 @@ export default function TodoView() {
               '今日',
               `${today.slice(5)} ${WEEKDAY_NAMES[new Date().getDay()]}`,
               todayItems,
-              '暂无今日待办 ✨',
+              '暂无今日待办',
             )}
             {renderSection(
               'week',

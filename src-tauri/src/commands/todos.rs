@@ -158,7 +158,7 @@ fn find_todo(vault_root: &str, id: i64) -> Option<(String, i64)> {
 
 const TODO_PAGE_FILE: &str = ".mynote-todos.json";
 
-fn read_todo_page(vault_root: &str) -> Vec<TodoPageItem> {
+pub(crate) fn read_todo_page(vault_root: &str) -> Vec<TodoPageItem> {
     let file_path = PathBuf::from(vault_root).join(TODO_PAGE_FILE);
     if !file_path.exists() {
         return Vec::new();
@@ -169,7 +169,7 @@ fn read_todo_page(vault_root: &str) -> Vec<TodoPageItem> {
         .unwrap_or_default()
 }
 
-fn write_todo_page(vault_root: &str, items: &[TodoPageItem]) {
+pub(crate) fn write_todo_page(vault_root: &str, items: &[TodoPageItem]) {
     let file_path = PathBuf::from(vault_root).join(TODO_PAGE_FILE);
     if let Ok(json) = serde_json::to_string_pretty(items) {
         let _ = fs::write(file_path, json);
@@ -346,12 +346,13 @@ pub fn todo_page_add(state: State<AppState>, content: String, section: String) -
 
     let mut items = read_todo_page(&vp);
     let now = chrono::Local::now();
+    let today = now.format("%Y-%m-%d").to_string();
     let item = TodoPageItem {
         id: uuid::Uuid::new_v4().to_string(),
         content,
         completed: false,
-        section,
-        created_date: now.format("%Y-%m-%d").to_string(),
+        section: section.clone(),
+        created_date: today.clone(),
         created_at: now.to_rfc3339(),
     };
     items.push(item.clone());
