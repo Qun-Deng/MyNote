@@ -393,7 +393,7 @@
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 1.5em auto;
+  margin: 1.5em 0;
   border-radius: 6px;
   box-shadow: 0 14px 36px rgba(36, 39, 43, 0.08);
 }
