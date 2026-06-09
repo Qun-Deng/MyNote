@@ -652,35 +652,51 @@
 
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ul),
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ol) {
+  --md-list-toggle-center: 1.0em;
   list-style: none;
   padding-left: 0.2em;
 }
 
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ul)::before,
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ol)::before {
-  content: "⌄";
+  content: "";
   position: absolute;
-  left: -1.35em;
-  top: 0.42em;
+  left: -1.45em;
+  top: var(--md-list-toggle-center);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.15em;
-  height: 1.15em;
+  width: 1.4em;
+  height: 1.4em;
   border: 0;
   border-radius: 4px;
-  color: var(--md-ink-muted);
   background: transparent;
-  font-family: var(--md-font-sans);
-  font-size: 0.86em;
-  line-height: 1;
   cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.milkdown-editor-container li:not([data-item-type="task"]):has(> ul)::after,
+.milkdown-editor-container li:not([data-item-type="task"]):has(> ol)::after {
+  content: "";
+  position: absolute;
+  left: -0.75em;
+  top: var(--md-list-toggle-center);
+  width: 0.42em;
+  height: 0.42em;
+  background: var(--md-ink-muted);
+  clip-path: polygon(12% 28%, 88% 28%, 50% 78%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ul):hover::before,
 .milkdown-editor-container li:not([data-item-type="task"]):has(> ol):hover::before {
-  color: var(--md-ink);
   background: rgba(125, 143, 138, 0.12);
+}
+
+.milkdown-editor-container li:not([data-item-type="task"]):has(> ul):hover::after,
+.milkdown-editor-container li:not([data-item-type="task"]):has(> ol):hover::after {
+  background: var(--md-ink);
 }
 
 .milkdown-editor-container li.md-list-collapsed > ul,
@@ -688,9 +704,9 @@
   display: none;
 }
 
-.milkdown-editor-container li:not([data-item-type="task"]).md-list-collapsed::before {
-  content: "›";
-  color: var(--md-accent);
+.milkdown-editor-container li:not([data-item-type="task"]).md-list-collapsed::after {
+  background: var(--md-accent);
+  clip-path: polygon(28% 12%, 28% 88%, 78% 50%);
 }
 
 /* ====== Dark Theme ====== */

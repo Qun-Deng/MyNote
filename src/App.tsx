@@ -9,7 +9,7 @@ import Dashboard from './components/dashboard/Dashboard'
 import DiaryView from './components/diary/DiaryView'
 import TodoView from './components/todo/TodoView'
 import KnowledgeView from './components/knowledge/KnowledgeView'
-import MilkdownEditor from './components/editor/MilkdownEditor'
+import MilkdownEditor, { setEditorVaultPath } from './components/editor/MilkdownEditor'
 import OutlineSidebar from './components/editor/OutlineSidebar'
 import { useAutoSave } from './components/editor/useAutoSave'
 import VaultPrompt from './components/layout/VaultPrompt'
@@ -158,6 +158,7 @@ function App() {
         if (path) {
           await window.mynote.vault.init(path)
           setVaultPath(path)
+          setEditorVaultPath(path)
           setVaultReady(true)
         }
       } catch {
@@ -174,6 +175,7 @@ function App() {
     if (path) {
       await window.mynote.vault.init(path)
       setVaultPath(path)
+      setEditorVaultPath(path)
       setVaultReady(true)
     }
   }
