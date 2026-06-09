@@ -11,7 +11,7 @@ export default function Titlebar() {
   }, [])
 
   return (
-    <div className="titlebar">
+    <div className="titlebar" data-tauri-drag-region>
       <div className="flex items-center gap-2 text-xs font-medium text-surface-600 pl-2">
         <span className="text-accent-600 font-semibold">MyNote</span>
       </div>

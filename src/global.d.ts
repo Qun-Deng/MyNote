@@ -1,4 +1,4 @@
-import type { MyNoteAPI } from '../electron/preload'
+import type { MyNoteAPI } from './api'
 
 declare global {
   interface Window {

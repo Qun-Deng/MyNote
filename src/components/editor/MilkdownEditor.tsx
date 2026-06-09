@@ -615,11 +615,22 @@ const mathHighlight = $prose(() => mathProsePlugin)
 
 // ── Local asset images ───────────────────────────────────────────────
 
+// Global vault path reference (set by App.tsx on vault init)
+let globalVaultPath: string | null = null
+export function setEditorVaultPath(path: string | null) {
+  globalVaultPath = path
+}
+
 function assetSrcForEditor(src: string) {
   const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '')
   if (!normalized.startsWith('assets/')) return src
-  const encoded = normalized.split('/').map(encodeURIComponent).join('/')
-  return `mynote-asset:///${encoded}`
+  if (globalVaultPath) {
+    const absPath = `${globalVaultPath.replace(/\\/g, '/').replace(/\/$/, '')}/${normalized}`
+    // On Windows, convert C:\... to https://asset.localhost/C:/...
+    return `https://asset.localhost/${absPath}`
+  }
+  // Fallback — won't render asset but won't crash
+  return src
 }
 
 const imageViewProsePlugin = new Plugin({
