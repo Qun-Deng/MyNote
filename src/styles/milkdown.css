@@ -480,34 +480,36 @@
 
 /* ====== Tag Highlight ====== */
 
+/* Tags: badge style — clearly distinct from headings */
 .milkdown-editor-container .md-tag {
-  color: #1a6e4a;
-  background: linear-gradient(135deg, rgba(26, 110, 74, 0.14), rgba(26, 110, 74, 0.08));
-  border: 1px solid rgba(26, 110, 74, 0.25);
-  border-radius: 4px;
-  padding: 0.08em 0.28em;
-  margin: 0 0.05em;
-  font-weight: 600;
+  color: #2e6b4f;
+  background: #e2f0e8;
+  border: 1px solid #b8d9c8;
+  border-radius: 5px;
+  padding: 0.02em 0.4em;
+  margin: 0 0.12em;
+  font-weight: 550;
   font-family: var(--md-font-sans);
-  font-size: 0.92em;
+  font-size: 0.88em;
   letter-spacing: 0.01em;
+  white-space: nowrap;
   transition: background 150ms ease, border-color 150ms ease;
 }
 
 .milkdown-editor-container .md-tag:hover {
-  background: linear-gradient(135deg, rgba(26, 110, 74, 0.22), rgba(26, 110, 74, 0.12));
-  border-color: rgba(26, 110, 74, 0.45);
+  background: #d0e8db;
+  border-color: #8ec4a8;
 }
 
 [data-theme="dark"] .milkdown-editor-container .md-tag {
-  color: #6fcf97;
-  background: linear-gradient(135deg, rgba(111, 207, 151, 0.16), rgba(111, 207, 151, 0.06));
-  border-color: rgba(111, 207, 151, 0.3);
+  color: #8fe0b0;
+  background: #1e3328;
+  border-color: #3d6650;
 }
 
 [data-theme="dark"] .milkdown-editor-container .md-tag:hover {
-  background: linear-gradient(135deg, rgba(111, 207, 151, 0.26), rgba(111, 207, 151, 0.12));
-  border-color: rgba(111, 207, 151, 0.5);
+  background: #253e31;
+  border-color: #5a8f70;
 }
 
 /* ====== Slash Menu and Collapsible Lists ====== */
