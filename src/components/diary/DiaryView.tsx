@@ -24,7 +24,10 @@ interface TimeBlock {
    13:07-15:07 test
 */
 function parseTimeBlocks(markdown: string): TimeBlock[] {
-  const lines = markdown.split('\n')
+  // Strip Milkdown backslash-escaped brackets before parsing.
+  // Milkdown escapes [ as \[ in saved markdown, which would break regex matching.
+  const clean = markdown.replace(/\\([[\]])/g, '$1')
+  const lines = clean.split('\n')
   const blocks: TimeBlock[] = []
   for (const line of lines) {
     const t = line.trim()
@@ -56,14 +59,24 @@ function timeToMin(t: string) { const [h, m] = t.split(':').map(Number); return 
 function fmtRange(s: string, e: string | null) { return e ? `${s} - ${e}` : s }
 
 function insertBlockIntoContent(content: string, blockLine: string): string {
-  // 1. Try to find existing ## [今日记录] header
-  const headerRe = /^##\s*\[今日记录\]/m
+  // Match ## [今日记录] header with optional Milkdown backslash escapes on brackets.
+  // Milkdown escapes [ → \[ and ] → \], so the header can be:
+  //   ## [今日记录]   or   ## \[今日记录\]   or   ## \[今日记录]
+  const headerRe = /^##\s*\\?\[今日记录\\?\]/m
   const headerMatch = content.match(headerRe)
   if (headerMatch) {
-    // Found — insert time block on the next line after this header
-    const lineEnd = content.indexOf('\n', headerMatch.index!)
-    const idx = lineEnd === -1 ? content.length : lineEnd + 1
-    return content.slice(0, idx) + `${blockLine}\n` + content.slice(idx)
+    // Found — append block at end of section, before next ## heading (or EOF).
+    const headerLineEnd = content.indexOf('\n', headerMatch.index!)
+    const afterHeader = headerLineEnd === -1 ? content.length : headerLineEnd + 1
+    const rest = content.slice(afterHeader)
+    const nextHeading = rest.search(/^##\s/m)
+    if (nextHeading >= 0) {
+      let pos = afterHeader + nextHeading
+      while (pos > afterHeader && content[pos - 1] === '\n') pos--
+      return content.slice(0, pos) + '\n\n' + blockLine + '\n\n' + content.slice(afterHeader + nextHeading)
+    } else {
+      return content.replace(/\n*$/, '\n' + blockLine + '\n')
+    }
   }
 
   // 2. No [今日记录] — try to find the title (# ...) and insert after it
@@ -71,20 +84,19 @@ function insertBlockIntoContent(content: string, blockLine: string): string {
   if (titleMatch) {
     const titleLineEnd = content.indexOf('\n', titleMatch.index!)
     let idx = titleLineEnd === -1 ? content.length : titleLineEnd + 1
-    // Skip one blank line after title if present
     if (content[idx] === '\n') idx++
-    return content.slice(0, idx) + `\n## [今日记录]\n${blockLine}\n` + content.slice(idx)
+    return content.slice(0, idx) + '## [今日记录]\n\n' + blockLine + '\n\n' + content.slice(idx)
   }
 
   // 3. No title either — try to insert after frontmatter
   const fmEnd = content.indexOf('---\n', 3)
   if (fmEnd > -1) {
     const insertAt = content.indexOf('\n', fmEnd + 4)
-    return content.slice(0, insertAt + 1) + `\n## [今日记录]\n${blockLine}\n` + content.slice(insertAt + 1)
+    return content.slice(0, insertAt + 1) + '## [今日记录]\n\n' + blockLine + '\n\n' + content.slice(insertAt + 1)
   }
 
   // 4. No structure at all — just append
-  return content + `\n${blockLine}\n`
+  return content + '\n## [今日记录]\n' + blockLine + '\n'
 }
 
 function buildDiaryTemplate(date: string): string {
@@ -159,9 +171,14 @@ export default function DiaryView() {
     const load = async () => {
       try {
         let diary = await window.mynote.diary.get(selectedDate)
+        const isNew = !diary
         if (!diary) {
           diary = await window.mynote.diary.create(selectedDate)
           refreshTree()
+        }
+        // Sync todoPage items into diary's [待办事项] section
+        if (isNew || selectedDate === today) {
+          try { await window.mynote.diary.syncFromPage(selectedDate) } catch {}
         }
         const result = await window.mynote.notes.read(diary.path)
         if (!cancelled) {
@@ -227,16 +244,17 @@ export default function DiaryView() {
 
   const handleDeleteBlock = async (block: TimeBlock) => {
     if (!diaryPath) return
+    // Strip Milkdown backslash escapes from both sides for comparison.
+    const stripEscapes = (s: string) => s.replace(/\\([[\]])/g, '$1').trim()
+    const target = stripEscapes(block.raw)
     const lines = diaryContent.split('\n')
-    const idx = lines.findIndex((l) => l.trim() === block.raw)
+    const idx = lines.findIndex((l) => stripEscapes(l) === target)
     if (idx > -1) {
       lines.splice(idx, 1)
       const nc = lines.join('\n')
       await window.mynote.notes.write(diaryPath, nc)
       setDiaryContent(nc)
     }
-    // If no blocks left, optionally delete the diary file?
-    // For now, just keep empty diary
   }
 
   const handleEditDiary = async () => {
@@ -275,9 +293,9 @@ export default function DiaryView() {
 
   // ---- Render ----
   return (
-    <div className="h-full flex">
+    <div className="h-full grid grid-cols-2">
       {/* ====== LEFT: Calendar ====== */}
-      <div className="w-72 flex-shrink-0 border-r border-surface-200 p-5 overflow-auto">
+      <div className="border-r border-surface-200 p-5 overflow-auto flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-surface-900">
             {format(currentMonth, 'yyyy年M月')}
@@ -294,7 +312,7 @@ export default function DiaryView() {
           </div>
         </div>
 
-        <div className="calendar-grid">
+        <div className="calendar-grid flex-shrink-0">
           {['一','二','三','四','五','六','日'].map(h => <div key={h} className="calendar-day-header">{h}</div>)}
           {weeks.map((week, wi) =>
             week.map((day, di) => {
@@ -311,10 +329,42 @@ export default function DiaryView() {
             })
           )}
         </div>
+
+        {/* Monthly diary entries list */}
+        <div className="mt-5 pt-4 border-t border-surface-150 flex-1 overflow-auto">
+          <h3 className="text-xs font-medium text-surface-500 mb-2 uppercase tracking-wider">
+            本月日记
+            <span className="ml-1 text-surface-400">({diaryDates.size})</span>
+          </h3>
+          {diaryDates.size === 0 ? (
+            <p className="text-xs text-surface-400">暂无</p>
+          ) : (
+            <div className="space-y-0.5">
+              {Array.from(diaryDates)
+                .sort((a, b) => b.localeCompare(a))
+                .map((ds) => {
+                  const d = new Date(ds)
+                  const isSel = ds === selectedDate
+                  return (
+                    <button
+                      key={ds}
+                      onClick={() => setSelectedDate(ds)}
+                      className={`w-full text-left text-xs px-2 py-1 rounded transition-colors truncate
+                        ${isSel ? 'bg-accent-100 text-accent-700 font-medium' : 'text-surface-600 hover:bg-surface-50'}
+                      `}
+                    >
+                      <span className="text-surface-400 mr-1.5">{format(d, 'd')}日</span>
+                      {['日','一','二','三','四','五','六'][d.getDay()]}
+                    </button>
+                  )
+                })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ====== RIGHT: Timeline ====== */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-surface-200 flex-shrink-0">
           <div className="flex items-center gap-2">

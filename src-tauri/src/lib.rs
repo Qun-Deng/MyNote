@@ -26,6 +26,7 @@ pub fn run() {
             commands::vault_cmd::vault_move,
             commands::vault_cmd::vault_create_folder,
             commands::vault_cmd::vault_delete_item,
+            commands::vault_cmd::vault_open_in_explorer,
             // Notes
             commands::notes::notes_list,
             commands::notes::notes_read,
@@ -53,6 +54,8 @@ pub fn run() {
             commands::diary::diary_create,
             commands::diary::diary_get_month,
             commands::diary::diary_get_range,
+            commands::diary::diary_sync_from_page,
+            commands::diary::diary_sync_to_page,
             // Todos
             commands::todos::todos_list,
             commands::todos::todos_toggle,

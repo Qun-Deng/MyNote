@@ -1,3 +1,4 @@
+use crate::commands::todos::{read_todo_page, write_todo_page, TodoPageItem};
 use crate::state::AppState;
 use crate::vault;
 use chrono::NaiveDate;
@@ -246,4 +247,168 @@ fn walk_diary_dir(
             }
         }
     }
+}
+
+// ── Todo Sync Helpers ──
+
+/// Parse the `## [待办事项]` section from markdown content.
+/// Returns list of (content, completed) tuples.
+/// Handles Milkdown backslash-escaped brackets: `\[待办事项\]`
+fn parse_diary_todo_section(content: &str) -> Vec<(String, bool)> {
+    // Match ## [待办事项] or ## \[待办事项\] on original content
+    let header_re = regex::Regex::new(r"(?m)^##\s*(?:\\\[|\[)待办事项(?:\\\]|\])").unwrap();
+    let header_match = match header_re.find(content) {
+        Some(m) => m,
+        None => return Vec::new(),
+    };
+
+    // Find start of content after the header line
+    let header_end = header_match.end();
+    let after_header = content[header_end..].find('\n').map(|i| header_end + i + 1).unwrap_or(content.len());
+
+    // Find end of section (next ## heading or EOF)
+    let rest = &content[after_header..];
+    let next_heading = regex::Regex::new(r"(?m)^##\s").unwrap();
+    let section_end = match next_heading.find(rest) {
+        Some(m) => after_header + m.start(),
+        None => content.len(),
+    };
+
+    let section_text = &content[after_header..section_end];
+
+    // Parse - [ ] / - [x] items from section text
+    let mut items = Vec::new();
+    for line in section_text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("- [ ]").or_else(|| trimmed.strip_prefix("* [ ]")).or_else(|| trimmed.strip_prefix("+ [ ]")) {
+            items.push((rest.trim().to_string(), false));
+        } else if let Some(rest) = trimmed.strip_prefix("- [x]").or_else(|| trimmed.strip_prefix("* [x]")).or_else(|| trimmed.strip_prefix("+ [x]"))
+            .or_else(|| trimmed.strip_prefix("- [X]")).or_else(|| trimmed.strip_prefix("* [X]")).or_else(|| trimmed.strip_prefix("+ [X]"))
+        {
+            items.push((rest.trim().to_string(), true));
+        }
+    }
+
+    items
+}
+
+/// Replace or insert the `## [待办事项]` section in markdown content.
+fn replace_diary_todo_section(content: &str, items: &[(String, bool)]) -> String {
+    let mut new_section = String::from("## [待办事项]\n");
+    if items.is_empty() {
+        new_section.push('\n');
+    } else {
+        for (text, completed) in items {
+            let marker = if *completed { "[x]" } else { "[ ]" };
+            new_section.push_str(&format!("- {} {}\n", marker, text));
+        }
+        new_section.push('\n');
+    }
+
+    // Match ## [待办事项] or ## \[待办事项\] on original content
+    let header_re = regex::Regex::new(r"(?m)^##\s*(?:\\\[|\[)待办事项(?:\\\]|\])").unwrap();
+    if let Some(header_match) = header_re.find(content) {
+        let section_start = header_match.start();
+        let header_end = header_match.end();
+        let after_header = content[header_end..].find('\n').map(|i| header_end + i + 1).unwrap_or(content.len());
+
+        let rest = &content[after_header..];
+        let next_heading = regex::Regex::new(r"(?m)^##\s").unwrap();
+        let section_end = match next_heading.find(rest) {
+            Some(m) => after_header + m.start(),
+            None => content.len(),
+        };
+
+        let mut end = section_end;
+        while end > after_header && content.as_bytes().get(end - 1) == Some(&b'\n') {
+            end -= 1;
+        }
+
+        format!("{}{}{}", &content[..section_start], new_section, &content[end..])
+    } else {
+        // No [待办事项] section — insert after the title (# header)
+        let title_re = regex::Regex::new(r"(?m)^#\s+.+$").unwrap();
+        if let Some(title_match) = title_re.find(content) {
+            let title_end = title_match.end();
+            let insert_pos = content[title_end..].find('\n').map(|i| title_end + i + 1).unwrap_or(content.len());
+            format!("{}\n{}{}", &content[..insert_pos].trim_end(), new_section, &content[insert_pos..])
+        } else {
+            format!("{}\n{}", new_section, content)
+        }
+    }
+}
+
+// ── Sync Commands ──
+
+/// Export todoPage items for a date into the diary's [待办事项] markdown section.
+#[tauri::command]
+pub fn diary_sync_from_page(state: State<AppState>, date: String) -> Result<(), String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Ok(()),
+    };
+
+    let diary_file = get_diary_path(&date);
+    let full_path = PathBuf::from(&vp).join(&diary_file);
+
+    if !full_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&full_path).map_err(|e| e.to_string())?;
+
+    let all_page_items = read_todo_page(&vp);
+    let date_items: Vec<(String, bool)> = all_page_items
+        .iter()
+        .filter(|t| t.section == "today" && t.created_date == date)
+        .map(|t| (t.content.clone(), t.completed))
+        .collect();
+
+    let new_content = replace_diary_todo_section(&content, &date_items);
+    if new_content != content {
+        fs::write(&full_path, new_content).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Import diary [待办事项] markdown section into todoPage for a date.
+/// Diary items replace the existing todoPage items for that date (section='today').
+#[tauri::command]
+pub fn diary_sync_to_page(state: State<AppState>, date: String) -> Result<(), String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Ok(()),
+    };
+
+    let diary_file = get_diary_path(&date);
+    let full_path = PathBuf::from(&vp).join(&diary_file);
+
+    if !full_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&full_path).map_err(|e| e.to_string())?;
+    let diary_items = parse_diary_todo_section(&content);
+
+    // Read existing todoPage items, remove today's items, add diary items
+    let mut all_items = read_todo_page(&vp);
+    all_items.retain(|t| !(t.section == "today" && t.created_date == date));
+
+    let now = chrono::Utc::now().to_rfc3339();
+    for (text, completed) in &diary_items {
+        all_items.push(TodoPageItem {
+            id: uuid::Uuid::new_v4().to_string(),
+            content: text.clone(),
+            completed: *completed,
+            section: "today".to_string(),
+            created_date: date.clone(),
+            created_at: now.clone(),
+        });
+    }
+
+    write_todo_page(&vp, &all_items);
+    Ok(())
 }

@@ -180,6 +180,25 @@ const markdownIndentProsePlugin = new Plugin({
 // Wrap as a Milkdown plugin so it can be .use()-d in the editor chain.
 const markdownIndent = $prose(() => markdownIndentProsePlugin)
 
+// ── List Backspace fix (TODO) ──────────────────────────────────
+// The handleKeyDown approach interferes with Enter key processing.
+// We'll use prosemirror-keymap's keymap() instead, which binds
+// Backspace to a command that checks the cursor position and
+// prevents liftListItem from firing at list_item paragraph start.
+//
+// import { keymap } from 'prosemirror-keymap'
+// const listBackspacePlugin = $prose(() => keymap({
+//   Backspace: (state, dispatch) => {
+//     const { $from } = state.selection
+//     if ($from.parentOffset === 0 && $from.node(-1).type.name === 'list_item') {
+//       return true // handled — prevent lift
+//     }
+//     return false // let default behavior run
+//   }
+// }))
+//
+// Then add .use(listBackspacePlugin) below.
+
 // ── Collapsible (toggle) list plugin ──────────────────────────
 // Like Notion's toggle list: click the ▼/► icon to collapse/expand
 // nested children.  Uses decorations so state survives re-renders.

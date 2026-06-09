@@ -68,8 +68,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     try {
       await window.mynote.notes.write(currentMeta.path, currentContent)
-      // Also extract todos
-      await window.mynote.todos.extract(currentMeta.path, currentContent)
+      // Sync diary todos to todoPage on save
+      if (currentMeta.is_diary && currentMeta.diary_date) {
+        await window.mynote.diary.syncToPage(currentMeta.diary_date)
+      }
       set({ dirty: false })
     } catch (err) {
       console.error('Failed to save note:', err)

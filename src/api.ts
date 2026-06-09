@@ -47,6 +47,7 @@ const vaultApi = {
   move: (from: string, to: string) => invoke('vault_move', { from, to }),
   createFolder: (folderPath: string) => invoke('vault_create_folder', { folderPath }),
   deleteItem: (itemPath: string) => invoke('vault_delete_item', { itemPath }),
+  openInExplorer: (itemPath: string) => invoke('vault_open_in_explorer', { itemPath }),
   showContextMenu: async (itemPath: string, itemType: 'file' | 'directory') => {
     // Context menu is handled via Tauri menu API — simplified for now
     console.log('Context menu:', itemPath, itemType)
@@ -124,6 +125,8 @@ const diaryApi = {
   getRange: (startDate: string, endDate: string) =>
     invoke<any[]>('diary_get_range', { startDate, endDate }),
   create: (date: string) => invoke<any>('diary_create', { date }),
+  syncFromPage: (date: string) => invoke('diary_sync_from_page', { date }),
+  syncToPage: (date: string) => invoke('diary_sync_to_page', { date }),
 }
 
 // ── Todos ──
