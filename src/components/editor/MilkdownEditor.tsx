@@ -650,8 +650,8 @@ function assetSrcForEditor(src: string) {
   if (!normalized.startsWith('assets/')) return src
   if (globalVaultPath) {
     const absPath = `${globalVaultPath.replace(/\\/g, '/').replace(/\/$/, '')}/${normalized}`
-    // On Windows, convert C:\... to https://asset.localhost/C:/...
-    return `https://asset.localhost/${absPath}`
+    // Tauri asset protocol uses http://asset.localhost/<absolute-path>
+    return `http://asset.localhost/${absPath}`
   }
   // Fallback — won't render asset but won't crash
   return src
