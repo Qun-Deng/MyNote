@@ -41,9 +41,10 @@ function parseHeadings(markdown: string): Heading[] {
 interface OutlineSidebarProps {
   content: string
   onJumpToHeading?: (lineIndex: number) => void
+  width: number
 }
 
-export default function OutlineSidebar({ content, onJumpToHeading }: OutlineSidebarProps) {
+export default function OutlineSidebar({ content, onJumpToHeading, width }: OutlineSidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
 
   const headingTree = useMemo(() => parseHeadings(content), [content])
@@ -82,7 +83,7 @@ export default function OutlineSidebar({ content, onJumpToHeading }: OutlineSide
   if (headingTree.length === 0) return null
 
   return (
-    <div className="outline-sidebar">
+    <div className="outline-sidebar" style={{ width }}>
       <div className="outline-header">
         <ListTree className="w-3.5 h-3.5" />
         <span>大纲</span>

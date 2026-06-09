@@ -152,6 +152,15 @@ const todoPageApi = {
   toggle: (id: string) => invoke('todo_page_toggle', { id }),
 }
 
+// ── DDL (Deadlines) ──
+
+const ddlApi = {
+  list: () => invoke<any[]>('ddl_list'),
+  add: (content: string, deadline: string) =>
+    invoke<any>('ddl_add', { content, deadline }),
+  delete: (id: string) => invoke('ddl_delete', { id }),
+}
+
 // ── Search ──
 
 const searchApi = {
@@ -215,6 +224,7 @@ const api = {
   diary: diaryApi,
   todos: todosApi,
   todoPage: todoPageApi,
+  ddl: ddlApi,
   search: searchApi,
   git: gitApi,
   export: exportApi,

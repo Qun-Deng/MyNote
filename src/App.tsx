@@ -150,6 +150,41 @@ function App() {
   const [outlineOpen, setOutlineOpen] = useState(true)
   const prevActiveTabRef = useRef<string | null>(null)
 
+  // ── Resizable sidebars ──
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try { return Number(localStorage.getItem('sidebarWidth')) || 224 } catch { return 224 }
+  })
+  const [outlineWidth, setOutlineWidth] = useState(() => {
+    try { return Number(localStorage.getItem('outlineWidth')) || 200 } catch { return 200 }
+  })
+  const [resizeTarget, setResizeTarget] = useState<'sidebar' | 'outline' | null>(null)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  const outlineWidthRef = useRef(outlineWidth)
+  sidebarWidthRef.current = sidebarWidth
+  outlineWidthRef.current = outlineWidth
+
+  useEffect(() => {
+    if (!resizeTarget) return
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizeTarget === 'sidebar') {
+        setSidebarWidth(Math.max(160, Math.min(400, e.clientX)))
+      } else {
+        setOutlineWidth(Math.max(140, Math.min(400, window.innerWidth - e.clientX)))
+      }
+    }
+    const handleMouseUp = () => {
+      localStorage.setItem('sidebarWidth', String(sidebarWidthRef.current))
+      localStorage.setItem('outlineWidth', String(outlineWidthRef.current))
+      setResizeTarget(null)
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [resizeTarget])
+
   useEffect(() => {
     async function checkVault() {
       try {
@@ -369,7 +404,15 @@ function App() {
     <div className="app-container">
       <Titlebar />
       <div className="main-layout">
-        {sidebarOpen && <Sidebar />}
+        {sidebarOpen && (
+          <>
+            <Sidebar width={sidebarWidth} />
+            <div
+              className="w-1 cursor-col-resize hover:bg-accent-400/40 active:bg-accent-400/60 transition-colors flex-shrink-0"
+              onMouseDown={() => setResizeTarget('sidebar')}
+            />
+          </>
+        )}
         <div className="content-area">
           {/* Sidebar toggle — visible when collapsed */}
           {!sidebarOpen && (
@@ -481,7 +524,6 @@ function App() {
                 >
                   📄 导出
                 </button>
-                <span className="text-xs text-surface-400">{currentMeta.path}</span>
                 {/* Outline toggle */}
                 <button
                   onClick={() => setOutlineOpen(!outlineOpen)}
@@ -538,7 +580,15 @@ function App() {
                 </div>
 
                 {/* Outline sidebar */}
-                {outlineOpen && <OutlineSidebar content={currentContent} />}
+                {outlineOpen && (
+                  <>
+                    <div
+                      className="w-1 cursor-col-resize hover:bg-accent-400/40 active:bg-accent-400/60 transition-colors flex-shrink-0"
+                      onMouseDown={() => setResizeTarget('outline')}
+                    />
+                    <OutlineSidebar content={currentContent} width={outlineWidth} />
+                  </>
+                )}
               </div>
             </div>
           ) : (

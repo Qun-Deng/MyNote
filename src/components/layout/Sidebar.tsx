@@ -77,7 +77,7 @@ async function runFileAction(action: () => Promise<void>) {
   }
 }
 
-export default function Sidebar() {
+export default function Sidebar({ width }: { width: number }) {
   const activeView = useUIStore((s) => s.activeView)
   const setActiveView = useUIStore((s) => s.setActiveView)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
@@ -321,7 +321,7 @@ export default function Sidebar() {
   }
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width }}>
       {/* Quick Actions */}
       <div className="px-3 pt-3 pb-2">
         <button
