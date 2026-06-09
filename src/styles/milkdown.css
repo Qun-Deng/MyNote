@@ -480,36 +480,39 @@
 
 /* ====== Tag Highlight ====== */
 
-/* Tags: badge style — clearly distinct from headings */
+/* ── Tags (inline #tag badges) ──────────────────────────────────
+   Pill-shaped, compact, visually distinct from ALL heading levels.
+   Headings are block-level, serif, structural.
+   Tags are inline, sans-serif, decorative badges. */
 .milkdown-editor-container .md-tag {
-  color: #2e6b4f;
-  background: #e2f0e8;
-  border: 1px solid #b8d9c8;
-  border-radius: 5px;
-  padding: 0.02em 0.4em;
-  margin: 0 0.12em;
+  color: #33855a;
+  background: #e6f4ed;
+  border: 1px solid #b3ddc5;
+  border-radius: 999px;
+  padding: 0.04em 0.5em;
+  margin: 0 0.1em;
   font-weight: 550;
   font-family: var(--md-font-sans);
-  font-size: 0.88em;
+  font-size: 0.82em;
   letter-spacing: 0.01em;
   white-space: nowrap;
   transition: background 150ms ease, border-color 150ms ease;
 }
 
 .milkdown-editor-container .md-tag:hover {
-  background: #d0e8db;
-  border-color: #8ec4a8;
+  background: #d4eedf;
+  border-color: #8ac9a8;
 }
 
 [data-theme="dark"] .milkdown-editor-container .md-tag {
-  color: #8fe0b0;
-  background: #1e3328;
-  border-color: #3d6650;
+  color: #7ce0a8;
+  background: #1a3024;
+  border-color: #3a614a;
 }
 
 [data-theme="dark"] .milkdown-editor-container .md-tag:hover {
-  background: #253e31;
-  border-color: #5a8f70;
+  background: #213a2d;
+  border-color: #4d8060;
 }
 
 /* ====== Slash Menu and Collapsible Lists ====== */
