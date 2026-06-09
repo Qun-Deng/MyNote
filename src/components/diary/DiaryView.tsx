@@ -267,193 +267,208 @@ export default function DiaryView() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-[960px] mx-auto px-6 py-6">
+      <div className="max-w-[860px] mx-auto px-8 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-surface-800">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-surface-800">
             {format(currentMonth, 'yyyy年M月')}
           </h2>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentMonth((d) => addDays(d, -30))}
-              className="p-1 rounded-md hover:bg-surface-100 transition-colors"
+              disabled={!canGoPrev}
+              className="p-1.5 rounded-md hover:bg-surface-100 disabled:opacity-30 transition-colors"
             >
-              <ChevronLeft className="w-4 h-4 text-surface-500" />
+              <ChevronLeft className="w-4 h-4 text-surface-600" />
             </button>
             <button
               onClick={() => setCurrentMonth(new Date())}
-              className="text-xs px-2 py-0.5 rounded-md hover:bg-surface-100 text-surface-500 transition-colors"
+              className="text-xs px-2 py-1 rounded-md hover:bg-surface-100 text-surface-500 transition-colors"
             >
               今天
             </button>
             <button
               onClick={() => setCurrentMonth((d) => addDays(d, 30))}
-              className="p-1 rounded-md hover:bg-surface-100 transition-colors"
+              disabled={!canGoNext}
+              className="p-1.5 rounded-md hover:bg-surface-100 disabled:opacity-30 transition-colors"
             >
-              <ChevronRight className="w-4 h-4 text-surface-500" />
+              <ChevronRight className="w-4 h-4 text-surface-600" />
             </button>
           </div>
         </div>
 
-        {/* Left-Right Layout */}
-        <div className="flex gap-6">
-          {/* ── Left: Calendar ── */}
-          <div className="w-[240px] flex-shrink-0">
-            {/* Day headers */}
-            <div className="grid grid-cols-7 mb-0.5">
-              {['一', '二', '三', '四', '五', '六', '日'].map((d, i) => (
-                <div key={i} className="text-center text-[11px] font-medium text-surface-400 py-0.5">
-                  {d}
+        {/* Calendar Grid */}
+        <div className="mb-6">
+          {/* Day headers */}
+          <div className="grid grid-cols-7 mb-1">
+            {['一', '二', '三', '四', '五', '六', '日'].map((d, i) => (
+              <div key={i} className="text-center text-xs font-medium text-surface-400 py-1">
+                {d}
+              </div>
+            ))}
+          </div>
+          {/* Weeks */}
+          {weeks.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7">
+              {week.map((date, di) => {
+                const inMonth = isSameMonth(date, currentMonth)
+                const isSel = isSameDay(date, new Date(selectedDate))
+                const isTD = isToday(date)
+                const dateStr = format(date, 'yyyy-MM-dd')
+                const hasEntry = diaryDates.has(dateStr)
+                return (
+                  <button
+                    key={di}
+                    onClick={() => setSelectedDate(dateStr)}
+                    className={`relative flex flex-col items-center py-1.5 text-sm rounded-md transition-colors
+                      ${!inMonth ? 'text-surface-300' : isSel ? 'bg-accent-100 text-accent-700 font-semibold' : 'hover:bg-surface-50 text-surface-700'}
+                    `}
+                  >
+                    <span className={isTD ? 'w-6 h-6 rounded-full bg-accent-500 text-white flex items-center justify-center text-xs' : ''}>
+                      {format(date, 'd')}
+                    </span>
+                    {hasEntry && (
+                      <span className={`w-1 h-1 rounded-full mt-0.5 ${isSel ? 'bg-accent-500' : 'bg-accent-400'}`} />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Selected date display */}
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-surface-800">
+            {format(new Date(selectedDate), 'M月d日 EEEE')}
+          </h3>
+        </div>
+
+        {/* Timeline */}
+        {loading ? (
+          <div className="text-center text-surface-400 py-8 text-sm">Loading...</div>
+        ) : (
+          <div className="relative">
+            {/* Time axis */}
+            <div className="absolute left-0 top-0 bottom-0 w-16 flex flex-col pointer-events-none">
+              {hours.map((h) => (
+                <div key={h} className="flex items-start justify-end pr-3 text-xs text-surface-400" style={{ height: HOUR_HEIGHT }}>
+                  {h}:00
                 </div>
               ))}
             </div>
-            {/* Weeks */}
-            {weeks.map((week, wi) => (
-              <div key={wi} className="grid grid-cols-7">
-                {week.map((date, di) => {
-                  const inMonth = isSameMonth(date, currentMonth)
-                  const isSel = isSameDay(date, new Date(selectedDate))
-                  const isTD = isToday(date)
-                  const dateStr = format(date, 'yyyy-MM-dd')
-                  const hasEntry = diaryDates.has(dateStr)
-                  return (
-                    <button
-                      key={di}
-                      onClick={() => setSelectedDate(dateStr)}
-                      className={`relative flex flex-col items-center py-1 text-xs rounded-md transition-colors
-                        ${!inMonth ? 'text-surface-300' : isSel ? 'bg-accent-100 text-accent-700 font-semibold' : 'hover:bg-surface-50 text-surface-600'}
-                      `}
-                    >
-                      <span className={isTD ? 'w-5 h-5 rounded-full bg-accent-500 text-white flex items-center justify-center text-[11px]' : ''}>
-                        {format(date, 'd')}
+
+            {/* Timeline area */}
+            <div className="ml-16 relative" style={{ minHeight: TOTAL_HEIGHT }}>
+              {/* Hour grid lines */}
+              {hours.map((h) => (
+                <div
+                  key={h}
+                  className="border-t border-surface-150"
+                  style={{ height: HOUR_HEIGHT }}
+                />
+              ))}
+
+              {/* Time blocks */}
+              {blocks.map((block, i) => {
+                const sm = timeToMin(block.startTime) - START_HOUR * 60   // minutes from START_HOUR
+                const durMin = block.endTime ? Math.max(20, timeToMin(block.endTime) - timeToMin(block.startTime)) : 60
+                const topPx = (sm / TOTAL_MIN) * TOTAL_HEIGHT
+                const heightPx = Math.max(24, (durMin / TOTAL_MIN) * TOTAL_HEIGHT)
+
+                return (
+                  <div
+                    key={i}
+                    className="absolute left-1 right-2 rounded-md px-2 py-1 text-xs border border-accent-200 bg-accent-50 text-surface-700 hover:bg-accent-100 transition-colors group"
+                    style={{ top: topPx, height: heightPx }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-accent-700">
+                        {fmtRange(block.startTime, block.endTime)}
                       </span>
-                      {hasEntry && (
-                        <span className={`w-1 h-1 rounded-full mt-px ${isSel ? 'bg-accent-500' : 'bg-accent-400'}`} />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-
-            {/* Selected date */}
-            <div className="mt-4 pt-3 border-t border-surface-150">
-              <h3 className="text-sm font-semibold text-surface-700">
-                {format(new Date(selectedDate), 'M月d日 EEEE')}
-              </h3>
-            </div>
-          </div>
-
-          {/* ── Right: Timeline ── */}
-          <div className="flex-1 min-w-0">
-            {loading ? (
-              <div className="text-center text-surface-400 py-8 text-sm">Loading...</div>
-            ) : (
-              <div className="relative">
-                {/* Time axis */}
-                <div className="absolute left-0 top-0 bottom-0 w-14 flex flex-col pointer-events-none">
-                  {hours.map((h) => (
-                    <div key={h} className="flex items-start justify-end pr-2 text-[11px] text-surface-400" style={{ height: HOUR_HEIGHT }}>
-                      {h}:00
-                    </div>
-                  ))}
-                </div>
-
-                {/* Timeline area */}
-                <div className="ml-14 relative" style={{ minHeight: TOTAL_HEIGHT }}>
-                  {/* Hour grid lines */}
-                  {hours.map((h) => (
-                    <div
-                      key={h}
-                      className="border-t border-surface-150"
-                      style={{ height: HOUR_HEIGHT }}
-                    />
-                  ))}
-
-                  {/* Time blocks */}
-                  {blocks.map((block, i) => {
-                    const sm = timeToMin(block.startTime) - START_HOUR * 60
-                    const durMin = block.endTime ? Math.max(20, timeToMin(block.endTime) - timeToMin(block.startTime)) : 60
-                    const topPx = (sm / TOTAL_MIN) * TOTAL_HEIGHT
-                    const heightPx = Math.max(24, (durMin / TOTAL_MIN) * TOTAL_HEIGHT)
-
-                    return (
-                      <div
-                        key={i}
-                        className="absolute left-1 right-1 rounded-md px-2 py-1 text-xs border border-accent-200 bg-accent-50 text-surface-700 hover:bg-accent-100 transition-colors group"
-                        style={{ top: topPx, height: heightPx }}
+                      <button
+                        onClick={() => handleDeleteBlock(block)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-100 rounded"
+                        title="删除时间块"
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-accent-700">
-                            {fmtRange(block.startTime, block.endTime)}
-                          </span>
-                          <button
-                            onClick={() => handleDeleteBlock(block)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-100 rounded"
-                            title="删除时间块"
-                          >
-                            <Trash2 className="w-3 h-3 text-red-400" />
-                          </button>
-                        </div>
-                        <div className="truncate text-surface-600">{block.text}</div>
-                      </div>
-                    )
-                  })}
-
-                  {/* Empty state */}
-                  {blocks.length === 0 && (
-                    <div className="absolute inset-0 flex items-center justify-center text-surface-400 text-sm">
-                      暂无记录 — 点击 + 添加时间块
+                        <Trash2 className="w-3 h-3 text-red-400" />
+                      </button>
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
+                    <div className="truncate text-surface-600">{block.text}</div>
+                  </div>
+                )
+              })}
 
-            {/* Add block */}
-            <div className="mt-4">
-              {showAdd ? (
-                <div className="flex items-center gap-2 flex-wrap p-2 border border-surface-200 rounded-lg bg-surface-50">
-                  <input
-                    type="time" value={newStart}
-                    onChange={(e) => setNewStart(e.target.value)}
-                    className="px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
-                  />
-                  <span className="text-surface-400 text-sm">-</span>
-                  <input
-                    type="time" value={newEnd}
-                    onChange={(e) => setNewEnd(e.target.value)}
-                    className="px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
-                    placeholder="结束"
-                  />
-                  <input
-                    type="text" value={newText}
-                    onChange={(e) => setNewText(e.target.value)}
-                    className="flex-1 min-w-[100px] px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
-                    placeholder="做了什么..."
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddBlock() }}
-                  />
-                  <button onClick={handleAddBlock} className="px-3 py-1 text-sm bg-accent-500 text-white rounded-md hover:bg-accent-600 transition-colors">
-                    添加
-                  </button>
-                  <button onClick={() => { setShowAdd(false); setNewStart(''); setNewEnd(''); setNewText('') }} className="px-2 py-1 text-sm text-surface-500 hover:text-surface-700 transition-colors">
-                    取消
-                  </button>
+              {/* Empty state */}
+              {blocks.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center text-surface-400 text-sm">
+                  暂无记录 — 点击 + 添加时间块
                 </div>
-              ) : (
-                <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-accent-600 transition-colors px-1 py-0.5">
-                  <Plus className="w-4 h-4" /> 添加时间块
-                </button>
               )}
             </div>
+          </div>
+        )}
 
-            {/* Open in editor */}
-            <div className="mt-3 pt-3 border-t border-surface-150">
-              <button onClick={handleEditInEditor} className="flex items-center gap-1 text-xs text-surface-400 hover:text-accent-600 transition-colors">
-                <FileText className="w-3.5 h-3.5" /> 在编辑器中打开
+        {/* Add block button */}
+        <div className="mt-4">
+          {showAdd ? (
+            <div className="flex items-center gap-2 flex-wrap p-3 border border-surface-200 rounded-lg bg-surface-50">
+              <input
+                type="time"
+                value={newStart}
+                onChange={(e) => setNewStart(e.target.value)}
+                className="px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
+                placeholder="开始"
+              />
+              <span className="text-surface-400 text-sm">-</span>
+              <input
+                type="time"
+                value={newEnd}
+                onChange={(e) => setNewEnd(e.target.value)}
+                className="px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
+                placeholder="结束 (可选)"
+              />
+              <input
+                type="text"
+                value={newText}
+                onChange={(e) => setNewText(e.target.value)}
+                className="flex-1 min-w-[120px] px-2 py-1 text-sm border border-surface-200 rounded-md bg-white text-surface-700"
+                placeholder="做了什么..."
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddBlock() }}
+              />
+              <button
+                onClick={handleAddBlock}
+                className="px-3 py-1 text-sm bg-accent-500 text-white rounded-md hover:bg-accent-600 transition-colors"
+              >
+                添加
+              </button>
+              <button
+                onClick={() => { setShowAdd(false); setNewStart(''); setNewEnd(''); setNewText('') }}
+                className="px-2 py-1 text-sm text-surface-500 hover:text-surface-700 transition-colors"
+              >
+                取消
               </button>
             </div>
-          </div>
+          ) : (
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-accent-600 transition-colors px-2 py-1"
+            >
+              <Plus className="w-4 h-4" />
+              添加时间块
+            </button>
+          )}
+        </div>
+
+        {/* Open in full editor */}
+        <div className="mt-6 pt-4 border-t border-surface-150">
+          <button
+            onClick={handleEditInEditor}
+            className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-accent-600 transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            在编辑器中打开
+          </button>
         </div>
       </div>
     </div>
