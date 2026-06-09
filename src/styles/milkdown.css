@@ -330,7 +330,7 @@
 
 .milkdown-editor-container table {
   width: 100%;
-  margin: 1.5em 0;
+  margin: 0.8em 0;
   border-collapse: collapse;
   table-layout: fixed;
   font-family: var(--md-font-sans);
@@ -346,7 +346,7 @@
   position: relative;
   box-sizing: border-box;
   border: 1px solid var(--md-rule);
-  padding: 0.65em 0.85em;
+  padding: 0.35em 0.75em;
   text-align: left;
   vertical-align: top;
 }

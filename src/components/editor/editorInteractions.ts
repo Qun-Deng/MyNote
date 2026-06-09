@@ -386,9 +386,80 @@ export function executeEditorAction(editor: Editor, actionId: string, range?: Sl
       return true
     }
     case 'bullet-list':
-      return callCommand(editor, wrapInBulletListCommand)
-    case 'ordered-list':
-      return callCommand(editor, wrapInOrderedListCommand)
+    case 'ordered-list': {
+      // Same paragraph-replacement strategy as todo/toggle-list
+      // so the list replaces the current line, not the next one.
+      if (!range) return false
+
+      const paraBefore = getCurrentParagraph(view)
+      const paraTextBefore = view.state.doc.textBetween(
+        paraBefore.from + 1,
+        paraBefore.to - 1,
+      )
+      const slashOffset = range.from - paraBefore.from - 1
+      let lineStart = 0
+      let lineEnd = paraTextBefore.length
+      for (let i = slashOffset - 1; i >= 0; i -= 1) {
+        if (paraTextBefore[i] === '\n') { lineStart = i + 1; break }
+      }
+      for (let i = slashOffset; i < paraTextBefore.length; i += 1) {
+        if (paraTextBefore[i] === '\n') { lineEnd = i; break }
+      }
+      const beforeText = lineStart > 0
+        ? paraTextBefore.slice(0, lineStart - 1)
+        : ''
+      const afterText = lineEnd < paraTextBefore.length
+        ? paraTextBefore.slice(lineEnd + 1)
+        : ''
+
+      deleteRange(view, range)
+      view.focus()
+
+      const { state, dispatch } = view
+      const { schema } = state
+      const { from, to } = getCurrentParagraph(view)
+
+      const listNodeType = actionId === 'bullet-list'
+        ? schema.nodes.bullet_list
+        : schema.nodes.ordered_list
+      const label = beforeText.trim() || afterText.trim() || ''
+
+      const item = listNodeType.create({}, [
+        schema.nodes.list_item.create({}, [
+          paragraphNode(schema, label),
+        ]),
+      ])
+
+      const hasAdjacent = beforeText.trim() && afterText.trim()
+
+      if (hasAdjacent) {
+        const parts: any[] = []
+        parts.push(schema.nodes.paragraph.create({}, schema.text(beforeText.trim())))
+        parts.push(item)
+        parts.push(schema.nodes.paragraph.create({}, schema.text(afterText.trim())))
+        dispatch(state.tr.replaceWith(from, to, parts).scrollIntoView())
+        setSelectionNear(view, from + 2)
+      } else if (beforeText.trim() || afterText.trim()) {
+        const parts: any[] = []
+        parts.push(item)
+        const other = beforeText.trim() || afterText.trim()
+        if (other) {
+          parts.push(schema.nodes.paragraph.create({}, schema.text(other)))
+        }
+        dispatch(state.tr.replaceWith(from, to, parts).scrollIntoView())
+        // Select the label text so user can overwrite it
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, from + 2, from + 2 + label.length))
+            .scrollIntoView(),
+        )
+        view.focus()
+      } else {
+        dispatch(state.tr.replaceWith(from, to, item).scrollIntoView())
+        setSelectionNear(view, from + 2)
+      }
+      return true
+    }
     case 'code':
       return callCommand(editor, createCodeBlockCommand)
     case 'table':
