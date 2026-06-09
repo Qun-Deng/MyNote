@@ -480,10 +480,19 @@
 
 /* ====== Tag Highlight ====== */
 
-/* ── Tags (inline #tag badges) ──────────────────────────────────
-   Pill-shaped, compact, visually distinct from ALL heading levels.
-   Headings are block-level, serif, structural.
-   Tags are inline, sans-serif, decorative badges. */
+/* ── Tags (inline [#tag] badges) ──────────────────────────────────
+   [#tag] written in source, rendered as just the tag name pill.
+   Prefix [# and suffix ] are transparent and squeezed to zero width. */
+
+.milkdown-editor-container .md-tag-prefix,
+.milkdown-editor-container .md-tag-suffix {
+  color: transparent;
+  font-size: 0;
+  letter-spacing: -1ch;
+  user-select: none;
+  pointer-events: none;
+}
+
 .milkdown-editor-container .md-tag {
   color: #33855a;
   background: #e6f4ed;
@@ -497,6 +506,7 @@
   letter-spacing: 0.01em;
   white-space: nowrap;
   transition: background 150ms ease, border-color 150ms ease;
+  cursor: pointer;
 }
 
 .milkdown-editor-container .md-tag:hover {

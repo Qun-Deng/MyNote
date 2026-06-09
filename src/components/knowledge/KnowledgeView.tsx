@@ -305,7 +305,7 @@ export default function KnowledgeView() {
   }
 
   const handleDeleteTag = async (tagName: string) => {
-    if (!confirm(`确定删除标签 "#${tagName}" 吗？将从所有笔记中移除此标签。`)) return
+    if (!confirm(`确定删除标签 "[#${tagName}]" 吗？将从所有笔记中移除此标签。`)) return
     try {
       const updated = await window.mynote.tags.delete(tagName)
       setAllTags(updated)
@@ -522,7 +522,7 @@ export default function KnowledgeView() {
                         : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800'
                     }`}
                   >
-                    #{tag}
+                    [#{tag}]
                   </span>
                   {/* Tag context menu */}
                   {tagMenuOpen === tag && (
@@ -709,7 +709,7 @@ export default function KnowledgeView() {
                       className="bg-accent-50 text-accent-700 px-2 py-0.5 rounded cursor-pointer"
                       onClick={() => setActiveTag(null)}
                     >
-                      #{activeTag} ✕
+                      [#{activeTag}] ✕
                     </span>
                   )}
                   <span className="text-surface-400">({filteredNotes.length} 条)</span>

@@ -325,12 +325,13 @@ const collapsibleListProsePlugin = new Plugin({
 const collapsibleList = $prose(() => collapsibleListProsePlugin)
 
 // ── Tag highlight plugin ──────────────────────────────────────────
-// Detects #tag patterns in text and applies a highlight decoration
-// so tags stand out visually from normal prose.
+// Detects [#tag] bracket patterns — renders ONLY the tag name as a
+// visible pill badge. Brackets are hidden (transparent, zero-width).
 
 const tagHighlightPluginKey = new PluginKey('mdTagHighlight')
 
-const TAG_REGEX = /(^|[\s([{])(\\?)#([\p{L}\p{N}_-]+)/gu
+// Groups: 1=prefix ([# or \[#), 2=tag name, 3=suffix (])
+const TAG_REGEX = /(\\?\[#)([^\]#\\\s]+)(\])/g
 
 function buildTagDecorations(doc: ProseNode) {
   const decos: Decoration[] = []
@@ -343,13 +344,17 @@ function buildTagDecorations(doc: ProseNode) {
     TAG_REGEX.lastIndex = 0
 
     while ((match = TAG_REGEX.exec(text)) !== null) {
-      const prefixLength = match[1]?.length ?? 0
-      const escapeLength = match[2]?.length ?? 0
-      const from = pos + match.index + prefixLength + escapeLength
-      const to = from + match[3].length + 1
-      decos.push(
-        Decoration.inline(from, to, { class: 'md-tag' }),
-      )
+      const matchStart = pos + match.index
+      const prefixEnd = matchStart + match[1].length
+      const tagNameEnd = prefixEnd + match[2].length
+      const suffixEnd = tagNameEnd + match[3].length
+
+      // Prefix [# → hidden
+      decos.push(Decoration.inline(matchStart, prefixEnd, { class: 'md-tag-prefix' }))
+      // Tag name → visible pill
+      decos.push(Decoration.inline(prefixEnd, tagNameEnd, { class: 'md-tag' }))
+      // Suffix ] → hidden
+      decos.push(Decoration.inline(tagNameEnd, suffixEnd, { class: 'md-tag-suffix' }))
     }
   })
 
@@ -829,13 +834,7 @@ const imagePasteProsePlugin = new Plugin({
 const imagePaste = $prose(() => imagePasteProsePlugin)
 
 function normalizeClickedTag(text: string) {
-  return text
-    .trim()
-    .replace(/^\\+/, '')
-    .replace(/^[\[]?#/, '')
-    .replace(/[\]]+$/g, '')
-    .trim()
-    .toLowerCase()
+  return text.trim().toLowerCase()
 }
 
 export default function MilkdownEditor({ content, onContentChange, onNavigate, onTagClick, readOnly = false }: MilkdownEditorProps) {
