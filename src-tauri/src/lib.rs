@@ -69,6 +69,10 @@ pub fn run() {
             commands::todos::todo_page_add,
             commands::todos::todo_page_delete,
             commands::todos::todo_page_toggle,
+            // DDL
+            commands::todos::ddl_list,
+            commands::todos::ddl_add,
+            commands::todos::ddl_delete,
             // Search
             commands::search::search_query,
             commands::search::search_reindex,

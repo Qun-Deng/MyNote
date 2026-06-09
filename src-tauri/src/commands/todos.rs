@@ -387,3 +387,75 @@ pub fn todo_page_toggle(state: State<AppState>, id: String) -> Result<(), String
     }
     Ok(())
 }
+
+// ── DDL (Deadline) JSON storage ──
+
+const DDL_FILE: &str = ".mynote-ddls.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DdlItem {
+    pub id: String,
+    pub content: String,
+    pub deadline: String,
+    pub created_at: String,
+}
+
+fn read_ddls(vault_root: &str) -> Vec<DdlItem> {
+    let file_path = PathBuf::from(vault_root).join(DDL_FILE);
+    if !file_path.exists() {
+        return Vec::new();
+    }
+    fs::read_to_string(&file_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_ddls(vault_root: &str, items: &[DdlItem]) {
+    let file_path = PathBuf::from(vault_root).join(DDL_FILE);
+    if let Ok(json) = serde_json::to_string_pretty(items) {
+        let _ = fs::write(file_path, json);
+    }
+}
+
+#[tauri::command]
+pub fn ddl_list(state: State<AppState>) -> Result<Vec<DdlItem>, String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Ok(Vec::new()),
+    };
+    Ok(read_ddls(&vp))
+}
+
+#[tauri::command]
+pub fn ddl_add(state: State<AppState>, content: String, deadline: String) -> Result<DdlItem, String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Err("Vault not initialized".into()),
+    };
+    let mut items = read_ddls(&vp);
+    let item = DdlItem {
+        id: uuid::Uuid::new_v4().to_string(),
+        content,
+        deadline,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    items.push(item.clone());
+    write_ddls(&vp, &items);
+    Ok(item)
+}
+
+#[tauri::command]
+pub fn ddl_delete(state: State<AppState>, id: String) -> Result<(), String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Ok(()),
+    };
+    let items = read_ddls(&vp);
+    let filtered: Vec<DdlItem> = items.into_iter().filter(|t| t.id != id).collect();
+    write_ddls(&vp, &filtered);
+    Ok(())
+}

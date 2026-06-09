@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays,
   isSameMonth, isSameDay, isToday,
@@ -144,6 +144,48 @@ export default function DiaryView() {
   const [newEnd, setNewEnd] = useState('')
   const [newText, setNewText] = useState('')
 
+  // Resize state
+  const [resizing, setResizing] = useState<{
+    blockIdx: number
+    edge: 'top' | 'bottom'
+    startY: number
+    initialStartMin: number
+    initialEndMin: number
+  } | null>(null)
+  const [resizePreview, setResizePreview] = useState<{ startMin: number; endMin: number } | null>(null)
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const MIN_DURATION = 10
+
+  // DDL items
+  const [ddlItems, setDdlItems] = useState<any[]>([])
+  const [addingDdl, setAddingDdl] = useState(false)
+  const [newDdlContent, setNewDdlContent] = useState('')
+  const [newDdlDeadline, setNewDdlDeadline] = useState('')
+
+  const loadDDL = async () => {
+    try {
+      const all = await window.mynote.ddl.list()
+      all.sort((a: any, b: any) => a.deadline.localeCompare(b.deadline))
+      setDdlItems(all)
+    } catch { setDdlItems([]) }
+  }
+
+  useEffect(() => { loadDDL() }, [selectedDate])
+
+  const handleDdlAdd = async () => {
+    if (!newDdlContent.trim() || !newDdlDeadline) return
+    await window.mynote.ddl.add(newDdlContent.trim(), newDdlDeadline)
+    setNewDdlContent('')
+    setNewDdlDeadline('')
+    setAddingDdl(false)
+    loadDDL()
+  }
+
+  const handleDdlDelete = async (id: string) => {
+    await window.mynote.ddl.delete(id)
+    loadDDL()
+  }
+
   const openNote = useNoteStore((s) => s.openNote)
   const setOpenNotePath = useUIStore((s) => s.setOpenNotePath)
   const refreshTree = useVaultStore((s) => s.refreshTree)
@@ -244,7 +286,6 @@ export default function DiaryView() {
 
   const handleDeleteBlock = async (block: TimeBlock) => {
     if (!diaryPath) return
-    // Strip Milkdown backslash escapes from both sides for comparison.
     const stripEscapes = (s: string) => s.replace(/\\([[\]])/g, '$1').trim()
     const target = stripEscapes(block.raw)
     const lines = diaryContent.split('\n')
@@ -256,6 +297,98 @@ export default function DiaryView() {
       setDiaryContent(nc)
     }
   }
+
+  const updateBlockEndTime = async (block: TimeBlock, newEndMin: number) => {
+    if (!diaryPath) return
+    const newEnd = `${String(Math.floor(newEndMin / 60)).padStart(2, '0')}:${String(newEndMin % 60).padStart(2, '0')}`
+    // Replace end time in [HH:MM-HH:MM] or add end time to [HH:MM]
+    const newLine = block.raw.replace(
+      /\[(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?\]/,
+      `[$1-${newEnd}]`
+    )
+    if (newLine === block.raw) return
+    await replaceBlockLine(block, newLine)
+  }
+
+  const updateBlockStartTime = async (block: TimeBlock, newStartMin: number) => {
+    if (!diaryPath) return
+    const newStart = `${String(Math.floor(newStartMin / 60)).padStart(2, '0')}:${String(newStartMin % 60).padStart(2, '0')}`
+    const oldEnd = block.endTime || `${String(Math.floor((timeToMin(block.startTime) + 60) / 60)).padStart(2, '0')}:${String((timeToMin(block.startTime) + 60) % 60).padStart(2, '0')}`
+    const newLine = block.raw.replace(
+      /\[(\d{1,2}:\d{2})(?:-(\d{1,2}:\d{2}))?\]/,
+      `[${newStart}-${oldEnd}]`
+    )
+    if (newLine === block.raw) return
+    await replaceBlockLine(block, newLine)
+  }
+
+  const replaceBlockLine = async (block: TimeBlock, newLine: string) => {
+    if (!diaryPath) return
+    const stripEscapes = (s: string) => s.replace(/\\([[\]])/g, '$1').trim()
+    const target = stripEscapes(block.raw)
+    const lines = diaryContent.split('\n')
+    const idx = lines.findIndex((l) => stripEscapes(l) === target)
+    if (idx > -1) {
+      lines[idx] = newLine
+      const nc = lines.join('\n')
+      await window.mynote.notes.write(diaryPath, nc)
+      setDiaryContent(nc)
+    }
+  }
+
+  // ── Resize handlers (delta-based, no dead zone) ──
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, blockIdx: number, edge: 'top' | 'bottom', block: TimeBlock) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startMin = timeToMin(block.startTime)
+    const endMin = block.endTime ? timeToMin(block.endTime) : startMin + 60
+    setResizing({ blockIdx, edge, startY: e.clientY, initialStartMin: startMin, initialEndMin: endMin })
+    setResizePreview({ startMin, endMin })
+  }, [])
+
+  useEffect(() => {
+    if (!resizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = e.clientY - resizing.startY
+      const deltaMin = (deltaY / TOTAL_HEIGHT) * TOTAL_MIN
+      const snappedDelta = Math.round(deltaMin / 10) * 10 // 10-min snap
+
+      if (resizing.edge === 'bottom') {
+        let newEnd = resizing.initialEndMin + snappedDelta
+        newEnd = Math.max(newEnd, resizing.initialStartMin + MIN_DURATION)
+        newEnd = Math.min(newEnd, END_HOUR * 60)
+        setResizePreview({ startMin: resizing.initialStartMin, endMin: newEnd })
+      } else {
+        let newStart = resizing.initialStartMin + snappedDelta
+        newStart = Math.min(newStart, resizing.initialEndMin - MIN_DURATION)
+        newStart = Math.max(newStart, START_HOUR * 60)
+        setResizePreview({ startMin: newStart, endMin: resizing.initialEndMin })
+      }
+    }
+
+    const handleMouseUp = async () => {
+      if (!resizePreview) { setResizing(null); setResizePreview(null); return }
+      const block = blocks[resizing.blockIdx]
+      if (block) {
+        if (resizing.edge === 'bottom' && resizePreview.endMin !== resizing.initialEndMin) {
+          await updateBlockEndTime(block, resizePreview.endMin)
+        } else if (resizing.edge === 'top' && resizePreview.startMin !== resizing.initialStartMin) {
+          await updateBlockStartTime(block, resizePreview.startMin)
+        }
+      }
+      setResizing(null)
+      setResizePreview(null)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [resizing, resizePreview, blocks, diaryPath])
 
   const handleEditDiary = async () => {
     if (diaryPath) {
@@ -330,34 +463,94 @@ export default function DiaryView() {
           )}
         </div>
 
-        {/* Monthly diary entries list */}
-        <div className="mt-5 pt-4 border-t border-surface-150 flex-1 overflow-auto">
-          <h3 className="text-xs font-medium text-surface-500 mb-2 uppercase tracking-wider">
-            本月日记
-            <span className="ml-1 text-surface-400">({diaryDates.size})</span>
-          </h3>
-          {diaryDates.size === 0 ? (
-            <p className="text-xs text-surface-400">暂无</p>
+        {/* DDL — deadline items */}
+        <div className="mt-5 pt-4 border-t border-surface-150 flex-1 overflow-auto flex flex-col">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-medium text-surface-500 uppercase tracking-wider">
+              DDL
+              <span className="ml-1 text-surface-400">({ddlItems.length})</span>
+            </h3>
+            <button
+              onClick={() => { setAddingDdl(!addingDdl); setNewDdlContent(''); setNewDdlDeadline('') }}
+              className="p-0.5 hover:bg-surface-100 rounded transition-colors"
+              title="添加DDL"
+            >
+              <Plus className="w-3.5 h-3.5 text-surface-400" />
+            </button>
+          </div>
+
+          {/* Add form */}
+          {addingDdl && (
+            <div className="mb-2 p-2 rounded border border-accent-200 bg-accent-50/50 space-y-1.5">
+              <input
+                type="text"
+                value={newDdlContent}
+                onChange={e => setNewDdlContent(e.target.value)}
+                placeholder="事项内容..."
+                className="w-full text-xs px-2 py-1 rounded border border-surface-200 outline-none focus:border-accent-400"
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') handleDdlAdd(); if (e.key === 'Escape') setAddingDdl(false) }}
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={newDdlDeadline}
+                  onChange={e => setNewDdlDeadline(e.target.value)}
+                  className="flex-1 text-xs px-2 py-1 rounded border border-surface-200 outline-none focus:border-accent-400"
+                />
+                <button
+                  onClick={handleDdlAdd}
+                  disabled={!newDdlContent.trim() || !newDdlDeadline}
+                  className="text-xs bg-accent-500 text-white px-2.5 py-1 rounded font-medium hover:bg-accent-600 disabled:opacity-50"
+                >
+                  确认
+                </button>
+                <button onClick={() => setAddingDdl(false)} className="text-xs text-surface-400 hover:text-surface-600">
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
+
+          {ddlItems.length === 0 && !addingDdl ? (
+            <p className="text-xs text-surface-400">暂无截止事项</p>
           ) : (
-            <div className="space-y-0.5">
-              {Array.from(diaryDates)
-                .sort((a, b) => b.localeCompare(a))
-                .map((ds) => {
-                  const d = new Date(ds)
-                  const isSel = ds === selectedDate
-                  return (
-                    <button
-                      key={ds}
-                      onClick={() => setSelectedDate(ds)}
-                      className={`w-full text-left text-xs px-2 py-1 rounded transition-colors truncate
-                        ${isSel ? 'bg-accent-100 text-accent-700 font-medium' : 'text-surface-600 hover:bg-surface-50'}
-                      `}
-                    >
-                      <span className="text-surface-400 mr-1.5">{format(d, 'd')}日</span>
-                      {['日','一','二','三','四','五','六'][d.getDay()]}
-                    </button>
-                  )
-                })}
+            <div className="space-y-1">
+              {ddlItems.map((item: any) => {
+                const deadlineDate = new Date(item.deadline)
+                const todayDate = new Date(format(new Date(), 'yyyy-MM-dd'))
+                const daysLeft = Math.ceil((deadlineDate.getTime() - todayDate.getTime()) / 86400000)
+                const overdue = daysLeft < 0
+                return (
+                  <div
+                    key={item.id}
+                    className="group px-3 py-2.5 rounded-lg border border-surface-200 bg-white hover:shadow-sm transition-shadow"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm text-surface-800 font-medium truncate flex-1">{item.content}</span>
+                      <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
+                        overdue
+                          ? 'bg-red-100 text-red-600'
+                          : daysLeft <= 3
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {overdue ? `逾期${Math.abs(daysLeft)}天` : `剩${daysLeft}天`}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <p className="text-xs text-surface-400">📅 {item.deadline}</p>
+                      <button
+                        onClick={() => handleDdlDelete(item.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded transition-all"
+                        title="删除"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -403,10 +596,10 @@ export default function DiaryView() {
               <input type="time" value={newEnd} onChange={e => setNewEnd(e.target.value)}
                 className="px-2 py-1.5 text-sm border border-surface-300 rounded-md outline-none focus:border-accent-400 w-32" />
               <input type="text" value={newText} onChange={e => setNewText(e.target.value)} placeholder="做了什么..."
-                className="flex-1 px-3 py-1.5 text-sm border border-surface-300 rounded-md outline-none focus:border-accent-400"
+                className="flex-1 min-w-0 px-3 py-1.5 text-sm border border-surface-300 rounded-md outline-none focus:border-accent-400"
                 onKeyDown={e => { if (e.key === 'Enter') handleAddBlock() }} />
               <button onClick={handleAddBlock} disabled={!newStart || !newText}
-                className="px-4 py-1.5 text-sm bg-accent-600 text-white rounded-md hover:bg-accent-700 disabled:opacity-40 transition-colors">
+                className="px-4 py-1.5 text-sm bg-accent-600 text-white rounded-md hover:bg-accent-700 disabled:opacity-40 transition-colors whitespace-nowrap">
                 添加
               </button>
             </div>
@@ -423,7 +616,7 @@ export default function DiaryView() {
               <p className="text-sm">该日暂无时间记录</p>
             </div>
           ) : (
-            <div className="relative mx-6 my-6" style={{ height: TOTAL_HEIGHT }}>
+            <div ref={timelineRef} className="relative mx-6 my-6" style={{ height: TOTAL_HEIGHT }}>
               {/* Hour grid lines */}
               {hours.map((hour) => {
                 const y = ((hour - START_HOUR) / (END_HOUR - START_HOUR)) * TOTAL_HEIGHT
@@ -444,25 +637,48 @@ export default function DiaryView() {
               })}
               {/* Time blocks — in same coordinate system */}
               {blocks.map((block, idx) => {
-                const sm = timeToMin(block.startTime) - START_HOUR * 60   // minutes from START_HOUR
+                const isResizing = resizing?.blockIdx === idx
+                const baseStartMin = timeToMin(block.startTime)
+                const baseEndMin = block.endTime ? timeToMin(block.endTime) : baseStartMin + 60
+
+                const previewStartMin = isResizing && resizePreview ? resizePreview.startMin : baseStartMin
+                const previewEndMin = isResizing && resizePreview ? resizePreview.endMin : baseEndMin
+
+                const sm = previewStartMin - START_HOUR * 60
                 const top = (sm / TOTAL_MIN) * TOTAL_HEIGHT
-                const durMin = block.endTime ? Math.max(20, timeToMin(block.endTime) - timeToMin(block.startTime)) : 60
+                const durMin = Math.max(20, previewEndMin - previewStartMin)
                 const h = (durMin / TOTAL_MIN) * TOTAL_HEIGHT
+
+                const displayStart = `${String(Math.floor(previewStartMin / 60)).padStart(2, '0')}:${String(previewStartMin % 60).padStart(2, '0')}`
+                const displayEnd = `${String(Math.floor(previewEndMin / 60)).padStart(2, '0')}:${String(previewEndMin % 60).padStart(2, '0')}`
+
                 return (
                   <div key={idx} className="absolute left-14 right-6"
                     style={{ top, height: Math.max(32, h) }}>
-                    <div className="group relative bg-accent-50/60 border border-accent-200/60 rounded-lg px-3 py-1.5
-                                    hover:bg-accent-100 transition-colors h-full flex flex-col">
-                      <div className="flex items-start justify-between">
-                        <span className="text-[11px] font-medium text-accent-700 bg-accent-100 px-1.5 py-0.5 rounded">
-                          {fmtRange(block.startTime, block.endTime)}
-                        </span>
-                        <button onClick={() => handleDeleteBlock(block)}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-all ml-2">
-                          <Trash2 className="w-3 h-3 text-red-400" />
-                        </button>
-                      </div>
-                      <p className="text-sm text-surface-700 mt-1">{block.text}</p>
+                    <div className="group relative bg-accent-50/60 border border-accent-200/60 rounded-lg px-3 py-1
+                                    hover:bg-accent-100 transition-colors h-full flex items-center gap-2">
+                      {/* Top resize handle */}
+                      <div
+                        className="absolute top-0 left-0 right-0 h-2 cursor-ns-resize
+                                   opacity-0 group-hover:opacity-100 transition-opacity
+                                   hover:bg-accent-300/30 rounded-t-lg"
+                        onMouseDown={(e) => handleResizeStart(e, idx, 'top', block)}
+                      />
+                      <span className="text-[11px] font-medium text-accent-700 bg-accent-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                        {fmtRange(displayStart, block.endTime ? displayEnd : null)}
+                      </span>
+                      <span className="text-sm text-surface-700 truncate flex-1 min-w-0">{block.text}</span>
+                      <button onClick={() => handleDeleteBlock(block)}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-all flex-shrink-0">
+                        <Trash2 className="w-3 h-3 text-red-400" />
+                      </button>
+                      {/* Bottom resize handle */}
+                      <div
+                        className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize
+                                   opacity-0 group-hover:opacity-100 transition-opacity
+                                   hover:bg-accent-300/30 rounded-b-lg"
+                        onMouseDown={(e) => handleResizeStart(e, idx, 'bottom', block)}
+                      />
                     </div>
                   </div>
                 )
