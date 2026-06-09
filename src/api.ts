@@ -212,6 +212,7 @@ const pdfApi = {
 const assetsApi = {
   saveImage: (buffer: ArrayBuffer, filename: string) =>
     invoke<string>('assets_save_image', { buffer: Array.from(new Uint8Array(buffer)), filename }),
+  readDataUrl: (relPath: string) => invoke<string>('assets_read_data_url', { relPath }),
 }
 
 // ── Combined API ──

@@ -37,6 +37,32 @@ pub fn assets_save_image(state: State<AppState>, buffer: Vec<u8>, filename: Stri
     Ok(format!("assets/{}", final_name))
 }
 
+/// Read an image from the vault and return as a data URL (data:image/...;base64,...)
+#[tauri::command]
+pub fn assets_read_data_url(state: State<AppState>, rel_path: String) -> Result<String, String> {
+    let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
+    let vp = match vault_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return Err("Vault not initialized".into()),
+    };
+    let full_path = PathBuf::from(&vp).join(&rel_path);
+    let data = fs::read(&full_path).map_err(|e| e.to_string())?;
+    let ext = full_path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
 /// Read a PDF file and return as base64
 #[tauri::command]
 pub fn pdf_read(state: State<AppState>, file_path: String) -> Result<String, String> {

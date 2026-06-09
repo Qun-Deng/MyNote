@@ -85,6 +85,7 @@ pub fn run() {
             commands::export::export_markdown_to_html,
             // Assets & PDF
             commands::assets::assets_save_image,
+            commands::assets::assets_read_data_url,
             commands::assets::pdf_read,
             commands::assets::pdf_read_annotations,
             commands::assets::pdf_write_annotations,
