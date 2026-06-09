@@ -155,6 +155,8 @@ export default function DiaryView() {
   const [resizePreview, setResizePreview] = useState<{ startMin: number; endMin: number } | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const MIN_DURATION = 10
+  const [editingBlockIdx, setEditingBlockIdx] = useState<number | null>(null)
+  const [editBlockText, setEditBlockText] = useState('')
 
   // DDL items
   const [ddlItems, setDdlItems] = useState<any[]>([])
@@ -389,6 +391,21 @@ export default function DiaryView() {
       document.removeEventListener('mouseup', handleMouseUp)
     }
   }, [resizing, resizePreview, blocks, diaryPath])
+
+  const startEditBlock = (idx: number, text: string) => {
+    setEditingBlockIdx(idx)
+    setEditBlockText(text)
+  }
+
+  const submitEditBlock = async () => {
+    if (editingBlockIdx === null || !diaryPath) return
+    const block = blocks[editingBlockIdx]
+    if (!block || editBlockText.trim() === block.text) { setEditingBlockIdx(null); return }
+    const newLine = block.raw.replace(/\]\s+.+$/, `] ${editBlockText.trim()}`)
+    await replaceBlockLine(block, newLine)
+    setEditingBlockIdx(null)
+    setEditBlockText('')
+  }
 
   const handleEditDiary = async () => {
     if (diaryPath) {
@@ -667,7 +684,27 @@ export default function DiaryView() {
                       <span className="text-[11px] font-medium text-accent-700 bg-accent-100 px-1.5 py-0.5 rounded flex-shrink-0">
                         {fmtRange(displayStart, block.endTime ? displayEnd : null)}
                       </span>
-                      <span className="text-sm text-surface-700 truncate flex-1 min-w-0">{block.text}</span>
+                      {editingBlockIdx === idx ? (
+                        <input
+                          autoFocus
+                          value={editBlockText}
+                          onChange={e => setEditBlockText(e.target.value)}
+                          onBlur={submitEditBlock}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') submitEditBlock()
+                            if (e.key === 'Escape') { setEditingBlockIdx(null); setEditBlockText('') }
+                          }}
+                          className="flex-1 min-w-0 text-sm px-1.5 py-0.5 border border-accent-400 rounded outline-none bg-white"
+                        />
+                      ) : (
+                        <span
+                          className="text-sm text-surface-700 truncate flex-1 min-w-0 cursor-text"
+                          onDoubleClick={() => startEditBlock(idx, block.text)}
+                          title="双击编辑"
+                        >
+                          {block.text}
+                        </span>
+                      )}
                       <button onClick={() => handleDeleteBlock(block)}
                         className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-all flex-shrink-0">
                         <Trash2 className="w-3 h-3 text-red-400" />
