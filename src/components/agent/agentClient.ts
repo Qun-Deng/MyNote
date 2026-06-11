@@ -5,10 +5,14 @@ import type {
   AgentDraft,
   AgentMessage,
   AgentProviderConfig,
+  AgentToolCallEvent,
+  LinkedNoteContent,
+  SelectedNoteData,
 } from '../../../shared/agent'
 import type { NoteMeta } from '../../../shared/types'
 
 const MAX_CONTEXT_CHARS = 30_000
+const LINKED_NOTE_MAX_CHARS = 2_000
 const AGENT_CONFIG_KEY = 'mynote-agent-config-v1'
 const DEFAULT_AGENT_ENDPOINT = 'http://localhost:3000/api/agent/chat'
 
@@ -124,6 +128,145 @@ export function buildKnowledgeContext(notes: NoteMeta[], tags: string[]): AgentC
   })
 }
 
+// ── Phase 1: Enriched Context Builders ──
+
+function truncateLinkedNote(content: string): string {
+  if (content.length <= LINKED_NOTE_MAX_CHARS) return content
+  return content.slice(0, LINKED_NOTE_MAX_CHARS) + '\n\n...(truncated)'
+}
+
+function formatLinkedNotesAppendix(linkedNotes: LinkedNoteContent[]): string {
+  if (!linkedNotes || linkedNotes.length === 0) return ''
+  const sections = linkedNotes.map((note) => {
+    const relationLabel = note.relation === 'backlink' ? '反向链接' : '前向链接'
+    return [
+      `### [${relationLabel}] ${note.title}`,
+      `路径: ${note.path}`,
+      '',
+      truncateLinkedNote(note.content),
+    ].join('\n')
+  })
+  return ['', '## 关联笔记内容', '', ...sections].join('\n')
+}
+
+/**
+ * Editor mode: enrich context with bidirectional link content.
+ * Linked notes are appended as a Markdown appendix within noteContent.
+ */
+export function buildEnrichedEditorContext(params: {
+  noteMeta: NoteMeta | null
+  noteContent: string
+  selectedText?: string
+  linkedNotes?: LinkedNoteContent[]
+}): AgentContext {
+  const { noteMeta, noteContent, selectedText, linkedNotes } = params
+
+  const baseTruncated = truncateNoteContent(noteContent)
+
+  const appendix = linkedNotes && linkedNotes.length > 0
+    ? formatLinkedNotesAppendix(linkedNotes)
+    : ''
+
+  let combined = baseTruncated.content + appendix
+  let truncated = baseTruncated.truncated
+
+  if (combined.length > MAX_CONTEXT_CHARS) {
+    const appendixMax = MAX_CONTEXT_CHARS - baseTruncated.content.length
+    if (appendixMax > 500) {
+      const trimmedAppendix = appendix.slice(0, appendixMax) + '\n\n...(关联笔记已截断)'
+      combined = baseTruncated.content + trimmedAppendix
+    } else {
+      combined = baseTruncated.content
+    }
+    truncated = true
+  }
+
+  return {
+    noteMeta,
+    noteContent: combined,
+    selectedText: selectedText || undefined,
+    truncated,
+    linkedNotes,
+  }
+}
+
+/**
+ * Knowledge mode with explicit note selection: build rich multi-note context.
+ * Each selected note gets its own section with content + links.
+ */
+export function buildSelectionContext(selectedNotes: SelectedNoteData[]): AgentContext {
+  if (!selectedNotes || selectedNotes.length === 0) {
+    return {
+      noteMeta: null,
+      noteContent: '# 未选择笔记\n\n请先选择笔记作为 AI 上下文。',
+      isMultiNote: true,
+    }
+  }
+
+  const sections = selectedNotes.map((note, index) => {
+    const tagText = note.meta.tags.length > 0 ? note.meta.tags.join(', ') : '无'
+    const parts = [
+      `## 笔记 ${index + 1}: ${note.meta.title}`,
+      `路径: ${note.meta.path}  |  标签: ${tagText}`,
+      '',
+      '### 正文',
+      truncateNoteContent(note.content).content,
+    ]
+
+    if (note.backlinks.length > 0) {
+      parts.push('', '### 反向链接')
+      for (const bl of note.backlinks.slice(0, 5)) {
+        parts.push(`- [${bl.from_path}] ${bl.context || ''}`)
+      }
+    }
+
+    if (note.linkedContents.length > 0) {
+      parts.push('', '### 前向链接笔记内容')
+      for (const lc of note.linkedContents) {
+        parts.push(`#### ${lc.title} (${lc.path})`)
+        parts.push(truncateLinkedNote(lc.content))
+      }
+    }
+
+    return parts.join('\n')
+  })
+
+  let combined = [
+    `# AI 上下文：已选 ${selectedNotes.length} 篇笔记`,
+    '',
+    ...sections,
+  ].join('\n')
+
+  if (combined.length > MAX_CONTEXT_CHARS) {
+    const half = Math.floor(MAX_CONTEXT_CHARS / 2)
+    combined = combined.slice(0, half)
+      + '\n\n<!-- MyNote AI: 上下文过长，中间部分已省略 -->\n\n'
+      + combined.slice(-half)
+  }
+
+  return {
+    noteMeta: null,
+    noteContent: combined,
+    truncated: combined.length > MAX_CONTEXT_CHARS,
+    isMultiNote: true,
+  }
+}
+
+/**
+ * Dispatcher for knowledge mode: uses selection context when notes are selected,
+ * falls back to the existing knowledge-base overview otherwise.
+ */
+export function buildCombinedKnowledgeContext(
+  notes: NoteMeta[],
+  tags: string[],
+  selectedNoteContents?: SelectedNoteData[],
+): AgentContext {
+  if (selectedNoteContents && selectedNoteContents.length > 0) {
+    return buildSelectionContext(selectedNoteContents)
+  }
+  return buildKnowledgeContext(notes, tags)
+}
+
 function formatError(status: number, text: string, endpoint: string) {
   if (status === 404) {
     return [
@@ -148,6 +291,8 @@ export async function streamAgentResponse({
   config,
   signal,
   onDelta,
+  onToolCall,
+  vaultPath,
 }: {
   messages: AgentMessage[]
   action: AgentAction
@@ -155,6 +300,8 @@ export async function streamAgentResponse({
   config: AgentRuntimeConfig
   signal: AbortSignal
   onDelta: (delta: string) => void
+  onToolCall?: (event: AgentToolCallEvent) => void
+  vaultPath?: string
 }) {
   const endpoint = config.endpoint.trim()
   if (!endpoint) {
@@ -164,11 +311,22 @@ export async function streamAgentResponse({
     throw new Error('AI 网关地址需要是完整的 http(s) 地址。桌面端不能使用 /api/agent/chat，请填写 Vercel 地址或 http://localhost:3000/api/agent/chat。')
   }
 
+  // Auto-detect vault path if not provided
+  let resolvedVaultPath = vaultPath
+  if (!resolvedVaultPath) {
+    try {
+      if (typeof window !== 'undefined' && (window as any).mynote?.vault?.getPath) {
+        resolvedVaultPath = await (window as any).mynote.vault.getPath() || undefined
+      }
+    } catch { /* ignore */ }
+  }
+
   const request: AgentChatRequest = {
     messages,
     action,
     context,
     providerConfig: providerConfigFromRuntime(config),
+    vaultPath: resolvedVaultPath || undefined,
   }
 
   let response: Response
@@ -193,22 +351,72 @@ export async function streamAgentResponse({
     throw new Error(formatError(response.status, text, endpoint))
   }
 
+  const contentType = response.headers.get('Content-Type') || ''
+  const isSSE = contentType.includes('text/event-stream')
+
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  let buffer = ''
   let fullText = ''
 
+  if (!isSSE) {
+    // Fallback: raw text stream (Phase 1 / error responses)
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      const delta = decoder.decode(value, { stream: true })
+      fullText += delta
+      onDelta(delta)
+    }
+    const tail = decoder.decode()
+    if (tail) { fullText += tail; onDelta(tail) }
+    return fullText
+  }
+
+  // Parse SSE events from the stream (Phase 2)
   while (true) {
     const { value, done } = await reader.read()
     if (done) break
-    const delta = decoder.decode(value, { stream: true })
-    fullText += delta
-    onDelta(delta)
-  }
+    buffer += decoder.decode(value, { stream: true })
 
-  const tail = decoder.decode()
-  if (tail) {
-    fullText += tail
-    onDelta(tail)
+    // Split by double newline (SSE event boundary)
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''  // keep incomplete event in buffer
+
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith('data: ')) continue
+      try {
+        const event = JSON.parse(line.slice(6))
+        switch (event.type) {
+          case 'text':
+            fullText += event.delta
+            onDelta(event.delta)
+            break
+          case 'tool_start':
+            onToolCall?.({
+              type: 'start',
+              name: event.name,
+              args: event.args,
+            })
+            break
+          case 'tool_end':
+            onToolCall?.({
+              type: 'end',
+              name: event.name,
+            })
+            break
+          case 'error':
+            throw new Error(event.error || 'AI 服务返回错误')
+          case 'done':
+            break
+        }
+      } catch (err) {
+        // If it's a thrown error from above, re-throw
+        if (err instanceof Error && err.message.includes('AI 服务')) throw err
+        // Otherwise skip malformed SSE events
+      }
+    }
   }
 
   return fullText
@@ -269,6 +477,51 @@ export function createDraft({
       description: '将用 AI 改写结果替换当前选中文本的第一次匹配。',
       originalContent,
       nextContent,
+    }
+  }
+
+  // ── Phase 3: Write Operations ──
+
+  if (action === 'create_new_note') {
+    const titleMatch = cleanResponse.match(/^#\s+(.+)$/m)
+    const noteTitle = titleMatch ? titleMatch[1].trim() : '未命名笔记'
+    return {
+      id: createId('draft'),
+      action: 'create_new_note',
+      title: `新建笔记: ${noteTitle}`,
+      description: '将在 notes/ 文件夹中创建一篇新笔记。',
+      originalContent: '',
+      nextContent: cleanResponse,
+      newNoteFolder: 'notes',
+      newNoteTitle: noteTitle,
+    }
+  }
+
+  if (action === 'generate_content') {
+    const nextContent = `${originalContent.trimEnd()}\n\n${cleanResponse}`
+    return {
+      id: createId('draft'),
+      action: 'generate_content',
+      title: '追加生成内容',
+      description: '将 AI 生成的内容追加到当前笔记末尾。',
+      originalContent,
+      nextContent,
+    }
+  }
+
+  // Auto-detect: free_chat response that looks like a note (starts with # heading, substantial)
+  if (action === 'free_chat' && cleanResponse.length > 200 && /^#\s+/.test(cleanResponse)) {
+    const titleMatch = cleanResponse.match(/^#\s+(.+)$/m)
+    const noteTitle = titleMatch ? titleMatch[1].trim() : '未命名笔记'
+    return {
+      id: createId('draft'),
+      action: 'create_new_note',
+      title: `从对话创建: ${noteTitle}`,
+      description: 'AI 生成了类似笔记的内容，是否保存为新笔记？',
+      originalContent: '',
+      nextContent: cleanResponse,
+      newNoteFolder: 'notes',
+      newNoteTitle: noteTitle,
     }
   }
 

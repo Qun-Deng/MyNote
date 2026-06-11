@@ -16,10 +16,10 @@ import {
   X,
 } from 'lucide-react'
 import type { NoteMeta } from '../../../shared/types'
-import type { AgentAction, AgentDraft, AgentMessage } from '../../../shared/agent'
+import type { AgentAction, AgentDraft, AgentMessage, AgentRunState, AgentToolCallEvent, LinkedNoteContent, SelectedNoteData } from '../../../shared/agent'
 import {
-  buildAgentContext,
-  buildKnowledgeContext,
+  buildEnrichedEditorContext,
+  buildCombinedKnowledgeContext,
   createDraft,
   createId,
   DEFAULT_AGENT_CONFIG,
@@ -41,7 +41,13 @@ interface AgentSidebarProps {
   selectedText?: string
   notes?: NoteMeta[]
   tags?: string[]
-  onApplyDraft?: (nextContent: string) => Promise<void> | void
+  onApplyDraft?: (draft: AgentDraft) => Promise<void> | void
+  /** Phase 1: linked notes for editor enriched context */
+  linkedNoteContents?: LinkedNoteContent[]
+  /** Phase 1: selected notes for knowledge selection context */
+  selectedNoteContents?: SelectedNoteData[]
+  /** Phase 1: parent is still loading context data */
+  contextLoading?: boolean
 }
 
 interface AgentQuickAction {
@@ -65,6 +71,8 @@ const EDITOR_ACTIONS: AgentQuickAction[] = [
   { id: 'extract_todos', label: '提取待办事项', prompt: '请从当前笔记中提取可执行的待办事项。' },
   { id: 'rewrite_selection', label: '改写选中内容', prompt: '请改写我选中的内容。', requiresSelection: true },
   { id: 'suggest_tags_links', label: '标签/双链建议', prompt: '请给这篇笔记推荐标签和可能的双链。' },
+  { id: 'generate_content', label: '生成补充内容', prompt: '请根据上下文为当前笔记生成补充内容。' },
+  { id: 'create_new_note', label: '创建新笔记', prompt: '请创建一篇新笔记。用户会提供主题和要求。' },
 ]
 
 const KNOWLEDGE_ACTIONS: AgentQuickAction[] = [
@@ -72,10 +80,22 @@ const KNOWLEDGE_ACTIONS: AgentQuickAction[] = [
   { id: 'free_chat', label: '找出整理线索', prompt: '请根据当前知识库总览，指出可能需要整理、合并或补标签的地方。' },
   { id: 'free_chat', label: '推荐标签整理', prompt: '请根据标签和最近笔记，推荐一组更清晰的标签整理方案。' },
   { id: 'free_chat', label: '生成知识回顾', prompt: '请根据最近笔记生成一份简短的知识回顾。' },
+  { id: 'create_new_note', label: '创建新笔记', prompt: '请根据知识库内容创建一篇新笔记。' },
 ]
 
 function actionLabel(action: AgentAction, actions: AgentQuickAction[]) {
   return actions.find((item) => item.id === action)?.label ?? '自由提问'
+}
+
+function toolLabel(name: string): string {
+  const labels: Record<string, string> = {
+    search_notes: '正在搜索笔记...',
+    read_note: '正在读取笔记...',
+    list_notes_by_tag: '正在查找标签...',
+    get_backlinks: '正在查找反向链接...',
+    list_recent_notes: '正在列出最近笔记...',
+  }
+  return labels[name] ?? `正在执行: ${name}`
 }
 
 function withValidEndpoint(config: AgentRuntimeConfig): AgentRuntimeConfig {
@@ -117,6 +137,9 @@ export default function AgentSidebar({
   notes = [],
   tags = [],
   onApplyDraft,
+  linkedNoteContents,
+  selectedNoteContents,
+  contextLoading = false,
 }: AgentSidebarProps) {
   const isEditor = mode === 'editor'
   const actions = isEditor ? EDITOR_ACTIONS : KNOWLEDGE_ACTIONS
@@ -136,11 +159,12 @@ export default function AgentSidebar({
   const [history, setHistory] = useState<AgentHistoryItem[]>(() => loadAgentHistory())
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const [runState, setRunState] = useState<AgentRunState>({ phase: 'idle' })
 
   const trimmedSelection = selectedText.trim()
   const hasKnowledge = notes.length > 0
   const configReady = config.configured && isAgentGatewayEndpoint(config.endpoint)
-  const canAsk = configReady && (isEditor ? Boolean(currentNote && currentContent.trim()) : hasKnowledge)
+  const canAsk = configReady && !contextLoading && (isEditor ? Boolean(currentNote && currentContent.trim()) : hasKnowledge)
   const visibleHistory = history.filter((item) => item.mode === mode)
 
   useEffect(() => {
@@ -167,11 +191,15 @@ export default function AgentSidebar({
     if (!configReady) return '请先配置 AI'
     if (isEditor) {
       if (!currentNote) return '打开一篇笔记后可用'
-      if (trimmedSelection) return `已选中 ${trimmedSelection.length} 字`
-      return '使用整篇当前笔记'
+      const linkCount = linkedNoteContents?.length ?? 0
+      const base = trimmedSelection ? `已选中 ${trimmedSelection.length} 字` : '使用整篇当前笔记'
+      return linkCount > 0 ? `${base} + ${linkCount} 篇关联笔记` : base
+    }
+    if (selectedNoteContents && selectedNoteContents.length > 0) {
+      return `已选择 ${selectedNoteContents.length} 篇笔记作为上下文`
     }
     return hasKnowledge ? `已载入 ${notes.length} 篇笔记概览` : '暂无知识库上下文'
-  }, [configReady, currentNote, hasKnowledge, isEditor, notes.length, trimmedSelection])
+  }, [configReady, currentNote, hasKnowledge, isEditor, notes.length, trimmedSelection, linkedNoteContents, selectedNoteContents])
 
   const openConfig = () => {
     setConfigDraft(withValidEndpoint(config))
@@ -293,6 +321,7 @@ export default function AgentSidebar({
     setError(null)
     setActionsOpen(false)
     setHistoryOpen(false)
+    setRunState({ phase: 'idle' })
   }
 
   const deleteHistory = (id: string) => {
@@ -335,17 +364,41 @@ export default function AgentSidebar({
     setDraft(null)
     setRunning(true)
 
+    // Phase: preparing context
+    setRunState({ phase: 'preparing', detail: '正在构建上下文...' })
+
     const controller = new AbortController()
     abortRef.current = controller
 
     try {
+      // Build context
       const context = isEditor
-        ? buildAgentContext({
+        ? buildEnrichedEditorContext({
             noteMeta: currentNote ?? null,
             noteContent: currentContent,
             selectedText: trimmedSelection || undefined,
+            linkedNotes: linkedNoteContents,
           })
-        : buildKnowledgeContext(notes, tags)
+        : buildCombinedKnowledgeContext(notes, tags, selectedNoteContents)
+
+      // Phase: context ready — show what the AI will see
+      const linkCount = isEditor
+        ? (linkedNoteContents?.length ?? 0)
+        : (selectedNoteContents?.length ?? 0)
+
+      setRunState({
+        phase: 'preparing',
+        detail: linkCount > 0
+          ? isEditor
+            ? `当前笔记 + ${linkCount} 篇关联笔记作为上下文`
+            : `已选择 ${linkCount} 篇笔记及其关联内容作为上下文`
+          : isEditor
+            ? '使用当前笔记作为上下文'
+            : `使用知识库概览作为上下文 (${notes.length} 篇笔记)`,
+      })
+
+      // Phase: sending — now waiting for API
+      setRunState({ phase: 'sending' })
 
       const responseText = await streamAgentResponse({
         messages: nextMessages,
@@ -354,6 +407,8 @@ export default function AgentSidebar({
         config,
         signal: controller.signal,
         onDelta: (delta) => {
+          // First delta → switch to streaming
+          setRunState({ phase: 'streaming' })
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantMessage.id
@@ -362,9 +417,21 @@ export default function AgentSidebar({
             ),
           )
         },
+        onToolCall: (event: AgentToolCallEvent) => {
+          if (event.type === 'start') {
+            setRunState({
+              phase: 'executing',
+              detail: toolLabel(event.name),
+            })
+          } else {
+            setRunState({ phase: 'streaming' })
+          }
+        },
       })
 
-      if (isEditor) {
+      // Draft creation: editor-only actions + write actions (both modes)
+      const writeActions: AgentAction[] = ['create_new_note', 'generate_content']
+      if (isEditor || writeActions.includes(action)) {
         const nextDraft = createDraft({
           action,
           response: responseText,
@@ -387,6 +454,7 @@ export default function AgentSidebar({
       }
     } finally {
       setRunning(false)
+      setRunState({ phase: 'idle' })
       abortRef.current = null
     }
   }
@@ -400,6 +468,7 @@ export default function AgentSidebar({
   const cancel = () => {
     abortRef.current?.abort()
     setRunning(false)
+    setRunState({ phase: 'idle' })
   }
 
   const clear = () => {
@@ -416,7 +485,7 @@ export default function AgentSidebar({
     if (!draft || !onApplyDraft) return
     setApplyingDraft(true)
     try {
-      await onApplyDraft(draft.nextContent)
+      await onApplyDraft(draft)
       setDraft(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -487,6 +556,24 @@ export default function AgentSidebar({
         </div>
       )}
 
+      {/* Selected notes summary (knowledge AI context mode) */}
+      {!isEditor && selectedNoteContents && selectedNoteContents.length > 0 && (
+        <div className="agent-note-list">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Bot className="w-3 h-3 text-emerald-500" />
+            <span className="text-xs text-surface-500 font-medium">
+              AI 上下文 ({selectedNoteContents.length} 篇)
+            </span>
+          </div>
+          {selectedNoteContents.map((n) => (
+            <div key={n.meta.path} className="agent-note-row">
+              <span>{n.meta.title}</span>
+              <small>{n.meta.path}</small>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="agent-chat-log">
         {messages.length === 0 ? (
           <div className="agent-empty">
@@ -508,7 +595,21 @@ export default function AgentSidebar({
                 </button>
               </div>
               <div className="agent-message-content">
-                {message.content || (message.role === 'assistant' && running ? '思考中...' : '')}
+                {message.content ? (
+                  message.content
+                ) : message.role === 'assistant' && runState.phase !== 'idle' ? (
+                  <div className="agent-thinking">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>
+                      {runState.phase === 'preparing' && runState.detail}
+                      {runState.phase === 'sending' && '正在等待 AI 响应...'}
+                      {runState.phase === 'executing' && runState.detail}
+                      {runState.phase === 'streaming' && '正在生成回复...'}
+                    </span>
+                  </div>
+                ) : (
+                  ''
+                )}
               </div>
             </div>
           ))
@@ -526,6 +627,34 @@ export default function AgentSidebar({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+          {/* Folder & title editor for create_new_note */}
+          {draft.action === 'create_new_note' && (
+            <div className="agent-draft-meta">
+              <label>
+                <span>文件夹</span>
+                <select
+                  value={draft.newNoteFolder || 'notes'}
+                  onChange={(e) => setDraft({ ...draft, newNoteFolder: e.target.value })}
+                >
+                  <option value="notes">notes/</option>
+                  {Array.from(new Set(notes.map((n) => {
+                    const parts = n.path.split('/')
+                    return parts.length > 1 ? parts.slice(0, -1).join('/') : null
+                  }).filter(Boolean) as string[])).sort().map((folder) => (
+                    <option key={folder} value={folder}>{folder}/</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>标题</span>
+                <input
+                  value={draft.newNoteTitle || ''}
+                  onChange={(e) => setDraft({ ...draft, newNoteTitle: e.target.value })}
+                  placeholder="笔记标题"
+                />
+              </label>
+            </div>
+          )}
           <pre>{draft.nextContent}</pre>
           <div className="agent-draft-actions">
             <button onClick={() => void copyToClipboard(draft.nextContent, draft.id)} disabled={!draft.nextContent.trim()}>
@@ -578,11 +707,17 @@ export default function AgentSidebar({
         )}
         <textarea
           value={input}
-          disabled={!canAsk || running}
-          placeholder={canAsk ? (isEditor ? '向 AI 询问这篇笔记...' : '向 AI 询问知识库...') : '配置 AI 并准备好上下文后可提问'}
+          disabled={!canAsk || running || contextLoading}
+          placeholder={
+            contextLoading
+              ? '正在加载上下文...'
+              : canAsk
+                ? (isEditor ? '向 AI 询问这篇笔记...' : '向 AI 询问知识库...')
+                : '配置 AI 并准备好上下文后可提问'
+          }
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               handleSubmit()
             }

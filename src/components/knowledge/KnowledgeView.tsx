@@ -3,10 +3,12 @@ import {
   Library, Search, FolderTree, Tag, FileText, Clock, X,
   ArrowUpDown, Plus, Archive, Pin, Trash2, CheckSquare,
   Square, History, Link2, Pencil, ChevronDown, MoreHorizontal,
-  Bot, PanelRightClose, PanelRightOpen
+  Bot, PanelRightClose, PanelRightOpen, Loader2
 } from 'lucide-react'
 import { format } from 'date-fns'
 import type { NoteMeta, SearchResult, Backlink } from '../../../shared/types'
+import type { LinkedNoteContent, SelectedNoteData } from '../../../shared/agent'
+import { truncateNoteContent } from '../agent/agentClient'
 import { useNoteStore } from '../../stores/noteStore'
 import { useUIStore } from '../../stores/uiStore'
 import AgentSidebar from '../agent/AgentSidebar'
@@ -87,6 +89,10 @@ export default function KnowledgeView() {
   const [sortMenuOpen, setSortMenuOpen] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [aiContextMode, setAiContextMode] = useState(false)
+  const [aiSelectedPaths, setAiSelectedPaths] = useState<Set<string>>(new Set())
+  const [selectedNoteContents, setSelectedNoteContents] = useState<SelectedNoteData[]>([])
+  const [aiContextLoading, setAiContextLoading] = useState(false)
   const [tagMenuOpen, setTagMenuOpen] = useState<string | null>(null)
   const [tagRename, setTagRename] = useState<string | null>(null)
   const [tagRenameValue, setTagRenameValue] = useState('')
@@ -293,6 +299,103 @@ export default function KnowledgeView() {
     } catch (err) { console.error('Failed to batch tag:', err) }
   }
 
+  // ── AI Context Mode ──
+
+  const toggleAiSelect = (path: string) => {
+    setAiSelectedPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  const selectFolderForAi = (folder: string) => {
+    const paths = notes.filter((n) => n.path.startsWith(folder + '/')).map((n) => n.path)
+    setAiSelectedPaths(new Set(paths))
+  }
+
+  const selectTagForAi = (tag: string) => {
+    const paths = notes.filter((n) => n.tags.includes(tag)).map((n) => n.path)
+    setAiSelectedPaths(new Set(paths))
+  }
+
+  const enableAiContextMode = () => {
+    setBatchMode(false)
+    setSelectedPaths(new Set())
+    setAiContextMode(true)
+  }
+
+  const enableBatchMode = () => {
+    setAiContextMode(false)
+    setAiSelectedPaths(new Set())
+    setSelectedNoteContents([])
+    setBatchMode(true)
+  }
+
+  // Fetch selected notes' content + links for AI context
+  useEffect(() => {
+    if (!aiContextMode || aiSelectedPaths.size === 0) {
+      setSelectedNoteContents([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setAiContextLoading(true)
+      try {
+        const MAX_SELECTION = 10
+        const paths = Array.from(aiSelectedPaths).slice(0, MAX_SELECTION)
+        const results: SelectedNoteData[] = []
+
+        for (const path of paths) {
+          const noteContent = await window.mynote.notes.read(path).catch(() => null)
+          if (!noteContent) continue
+
+          const [backlinks, forwardLinks] = await Promise.all([
+            window.mynote.notes.backlinks(path).catch(() => [] as Backlink[]),
+            window.mynote.notes.forwardLinks(path).catch(() => [] as string[]),
+          ])
+
+          const allLinkedPaths = new Set([
+            ...backlinks.map((b: any) => b.from_path),
+            ...forwardLinks,
+          ].filter((p: string) => p !== path))
+
+          const MAX_LINKED_PER_NOTE = 5
+          const linkedPathsToFetch = Array.from(allLinkedPaths).slice(0, MAX_LINKED_PER_NOTE)
+          const linkedContents: LinkedNoteContent[] = []
+
+          for (const linkedPath of linkedPathsToFetch) {
+            const linked = await window.mynote.notes.read(linkedPath).catch(() => null)
+            if (linked) {
+              linkedContents.push({
+                path: linkedPath,
+                title: linked.meta.title,
+                content: truncateNoteContent(linked.content).content,
+                relation: backlinks.some((b: any) => b.from_path === linkedPath) ? 'backlink' : 'forward_link',
+              })
+            }
+          }
+
+          results.push({
+            meta: noteContent.meta,
+            content: truncateNoteContent(noteContent.content).content,
+            backlinks,
+            forwardLinks,
+            linkedContents,
+          })
+        }
+        setSelectedNoteContents(results)
+      } catch (err) {
+        console.error('Failed to fetch AI context notes:', err)
+      } finally {
+        setAiContextLoading(false)
+      }
+    }, 400)
+
+    return () => clearTimeout(timer)
+  }, [aiSelectedPaths, aiContextMode])
+
   // Tag management
   const handleRenameTag = async () => {
     if (!tagRename || !tagRenameValue.trim()) return
@@ -465,9 +568,9 @@ export default function KnowledgeView() {
             <h2 className="text-xs font-semibold text-surface-700">文件夹</h2>
           </div>
           <button
-            onClick={() => setSelectedFolder(null)}
+            onClick={() => aiContextMode ? setAiSelectedPaths(new Set()) : setSelectedFolder(null)}
             className={`w-full text-left px-2 py-1 rounded text-xs mb-0.5 transition-colors ${
-              selectedFolder === null
+              selectedFolder === null && !aiContextMode
                 ? 'bg-accent-50 text-accent-700 font-medium'
                 : 'text-surface-600 hover:bg-surface-100'
             }`}
@@ -479,11 +582,13 @@ export default function KnowledgeView() {
             return (
               <button
                 key={folder}
-                onClick={() => setSelectedFolder(folder)}
+                onClick={() => aiContextMode ? selectFolderForAi(folder) : setSelectedFolder(folder)}
                 className={`w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between ${
-                  selectedFolder === folder
+                  !aiContextMode && selectedFolder === folder
                     ? 'bg-accent-50 text-accent-700 font-medium'
-                    : 'text-surface-600 hover:bg-surface-100'
+                    : aiContextMode
+                      ? 'text-surface-600 hover:bg-emerald-50 hover:text-emerald-700'
+                      : 'text-surface-600 hover:bg-surface-100'
                 }`}
               >
                 <span className="truncate">{folder.split('/').pop()}</span>
@@ -514,7 +619,13 @@ export default function KnowledgeView() {
               {allTags.map((tag) => (
                 <div key={tag} className="relative group">
                   <span
-                    onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                    onClick={() => {
+                      if (aiContextMode) {
+                        selectTagForAi(tag)
+                      } else {
+                        setActiveTag(activeTag === tag ? null : tag)
+                      }
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setTagMenuOpen(tag === tagMenuOpen ? null : tag)
@@ -617,20 +728,58 @@ export default function KnowledgeView() {
               )}
             </div>
             {!showSearch && (
-              <button
-                onClick={() => { setBatchMode(!batchMode); setSelectedPaths(new Set()) }}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  batchMode
-                    ? 'bg-accent-100 text-accent-700'
-                    : 'text-surface-500 hover:bg-surface-100'
-                }`}
-              >
-                <CheckSquare className="w-3.5 h-3.5" />
-              </button>
+              <>
+                {/* AI Context Mode toggle */}
+                <button
+                  onClick={() => aiContextMode ? setAiContextMode(false) : enableAiContextMode()}
+                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    aiContextMode
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'text-surface-500 hover:bg-surface-100'
+                  }`}
+                  title={aiContextMode ? '退出 AI 上下文模式' : '进入 AI 上下文选择模式'}
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                </button>
+                {/* Batch mode toggle */}
+                <button
+                  onClick={() => batchMode ? setBatchMode(false) : enableBatchMode()}
+                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    batchMode
+                      ? 'bg-accent-100 text-accent-700'
+                      : 'text-surface-500 hover:bg-surface-100'
+                  }`}
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                </button>
+              </>
             )}
           </div>
 
           {/* Batch actions bar */}
+          {/* AI context selection bar */}
+          {aiContextMode && aiSelectedPaths.size > 0 && (
+            <div className="flex items-center gap-2 px-2 py-1.5 bg-emerald-50 rounded-md">
+              <Bot className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-xs text-emerald-700 font-medium">
+                已选 {aiSelectedPaths.size} 篇作为 AI 上下文
+                {aiContextLoading && (
+                  <span className="ai-context-loading-indicator ml-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    加载中...
+                  </span>
+                )}
+              </span>
+              <div className="flex-1" />
+              <button
+                onClick={() => { setAiSelectedPaths(new Set()); setSelectedNoteContents([]) }}
+                className="text-[11px] text-emerald-600 hover:text-emerald-700 bg-white px-2 py-1 rounded border border-emerald-200 transition-colors"
+              >
+                清除选择
+              </button>
+            </div>
+          )}
+
           {batchMode && selectedPaths.size > 0 && (
             <div className="flex items-center gap-2 px-2 py-1.5 bg-accent-50 rounded-md">
               <span className="text-xs text-accent-700 font-medium">
@@ -750,6 +899,9 @@ export default function KnowledgeView() {
                           onToggleArchive={(e) => handleToggleArchive(e, note)}
                           onBacklinks={(e) => handleShowBacklinks(e, note.path)}
                           onTagClick={(tag) => setActiveTag(tag)}
+                          aiContextMode={aiContextMode}
+                          aiSelected={aiSelectedPaths.has(note.path)}
+                          onToggleAiSelect={() => toggleAiSelect(note.path)}
                         />
                       ))}
                     </>
@@ -800,6 +952,9 @@ export default function KnowledgeView() {
                           onToggleArchive={(e) => handleToggleArchive(e, note)}
                           onBacklinks={(e) => handleShowBacklinks(e, note.path)}
                           onTagClick={(tag) => setActiveTag(tag)}
+                          aiContextMode={aiContextMode}
+                          aiSelected={aiSelectedPaths.has(note.path)}
+                          onToggleAiSelect={() => toggleAiSelect(note.path)}
                         />
                       ))}
                     </>
@@ -823,6 +978,9 @@ export default function KnowledgeView() {
                           onToggleArchive={(e) => handleToggleArchive(e, note)}
                           onBacklinks={(e) => handleShowBacklinks(e, note.path)}
                           onTagClick={(tag) => setActiveTag(tag)}
+                          aiContextMode={aiContextMode}
+                          aiSelected={aiSelectedPaths.has(note.path)}
+                          onToggleAiSelect={() => toggleAiSelect(note.path)}
                         />
                       ))}
                     </>
@@ -874,7 +1032,13 @@ export default function KnowledgeView() {
           )}
         </button>
         {aiOverviewOpen ? (
-          <AgentSidebar mode="knowledge" notes={notes} tags={allTags} />
+          <AgentSidebar
+            mode="knowledge"
+            notes={notes}
+            tags={allTags}
+            selectedNoteContents={aiContextMode ? selectedNoteContents : undefined}
+            contextLoading={aiContextMode && aiContextLoading}
+          />
         ) : (
           <div className="knowledge-ai-rail">
             <Bot className="w-4 h-4" />
@@ -1006,6 +1170,9 @@ function NoteRow({
   onBacklinks,
   onTagClick,
   subtle,
+  aiContextMode,
+  aiSelected,
+  onToggleAiSelect,
 }: {
   note: NoteMeta
   batchMode: boolean
@@ -1017,25 +1184,44 @@ function NoteRow({
   onBacklinks: (e: React.MouseEvent) => void
   onTagClick: (tag: string) => void
   subtle?: boolean
+  aiContextMode?: boolean
+  aiSelected?: boolean
+  onToggleAiSelect?: () => void
 }) {
+  const showCheckbox = batchMode || aiContextMode
+  const isAiCheckbox = aiContextMode && !batchMode
   return (
     <div
       className={`group flex items-center gap-2 px-2 py-2 rounded-md transition-colors cursor-pointer ${
         subtle
           ? 'text-surface-500 hover:bg-surface-50'
-          : selected
-            ? 'bg-accent-50 text-surface-800 hover:bg-accent-100'
-            : 'text-surface-700 hover:bg-surface-50'
+          : aiSelected && !batchMode
+            ? 'bg-emerald-50 text-surface-800 hover:bg-emerald-100'
+            : selected
+              ? 'bg-accent-50 text-surface-800 hover:bg-accent-100'
+              : 'text-surface-700 hover:bg-surface-50'
       }`}
-      onClick={batchMode ? onToggleSelect : onOpen}
+      onClick={batchMode ? onToggleSelect : aiContextMode ? onToggleAiSelect : onOpen}
     >
-      {/* Batch checkbox or icon */}
-      {batchMode ? (
-        <button onClick={(e) => { e.stopPropagation(); onToggleSelect() }} className="flex-shrink-0">
-          {selected ? (
-            <CheckSquare className="w-4 h-4 text-accent-500" />
+      {/* Checkbox or icon */}
+      {showCheckbox ? (
+        <button onClick={(e) => {
+          e.stopPropagation()
+          if (batchMode) onToggleSelect()
+          else if (onToggleAiSelect) onToggleAiSelect()
+        }} className="flex-shrink-0">
+          {isAiCheckbox ? (
+            aiSelected ? (
+              <CheckSquare className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <Square className="w-4 h-4 text-surface-300" />
+            )
           ) : (
-            <Square className="w-4 h-4 text-surface-300" />
+            selected ? (
+              <CheckSquare className="w-4 h-4 text-accent-500" />
+            ) : (
+              <Square className="w-4 h-4 text-surface-300" />
+            )
           )}
         </button>
       ) : (
@@ -1080,8 +1266,8 @@ function NoteRow({
         </div>
       )}
 
-      {/* Action buttons — always visible */}
-      {!batchMode && (
+      {/* Action buttons — hidden in any checkbox mode */}
+      {!showCheckbox && (
         <div className="flex gap-0.5 flex-shrink-0">
           <button
             onClick={onTogglePin}
