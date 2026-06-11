@@ -41,10 +41,11 @@ function parseHeadings(markdown: string): Heading[] {
 interface OutlineSidebarProps {
   content: string
   onJumpToHeading?: (lineIndex: number) => void
-  width: number
+  width?: number
+  embedded?: boolean
 }
 
-export default function OutlineSidebar({ content, onJumpToHeading, width }: OutlineSidebarProps) {
+export default function OutlineSidebar({ content, onJumpToHeading, width, embedded = false }: OutlineSidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
 
   const headingTree = useMemo(() => parseHeadings(content), [content])
@@ -80,7 +81,26 @@ export default function OutlineSidebar({ content, onJumpToHeading, width }: Outl
     onJumpToHeading?.(heading.line)
   }
 
-  if (headingTree.length === 0) return null
+  const tree = headingTree.length === 0 ? (
+    <p className="outline-empty">这篇笔记还没有标题。</p>
+  ) : (
+    <div className="outline-tree">
+      {headingTree.map((h) => (
+        <OutlineNode
+          key={h.line}
+          heading={h}
+          depth={0}
+          collapsed={collapsed}
+          onToggle={toggle}
+          onClick={handleClick}
+        />
+      ))}
+    </div>
+  )
+
+  if (embedded) {
+    return tree
+  }
 
   return (
     <div className="outline-sidebar" style={{ width }}>
@@ -88,18 +108,7 @@ export default function OutlineSidebar({ content, onJumpToHeading, width }: Outl
         <ListTree className="w-3.5 h-3.5" />
         <span>大纲</span>
       </div>
-      <div className="outline-tree">
-        {headingTree.map((h) => (
-          <OutlineNode
-            key={h.line}
-            heading={h}
-            depth={0}
-            collapsed={collapsed}
-            onToggle={toggle}
-            onClick={handleClick}
-          />
-        ))}
-      </div>
+      {tree}
     </div>
   )
 }

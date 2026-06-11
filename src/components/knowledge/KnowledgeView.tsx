@@ -2,12 +2,14 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
   Library, Search, FolderTree, Tag, FileText, Clock, X,
   ArrowUpDown, Plus, Archive, Pin, Trash2, CheckSquare,
-  Square, History, Link2, Pencil, ChevronDown, MoreHorizontal
+  Square, History, Link2, Pencil, ChevronDown, MoreHorizontal,
+  Bot, PanelRightClose, PanelRightOpen
 } from 'lucide-react'
 import { format } from 'date-fns'
 import type { NoteMeta, SearchResult, Backlink } from '../../../shared/types'
 import { useNoteStore } from '../../stores/noteStore'
 import { useUIStore } from '../../stores/uiStore'
+import AgentSidebar from '../agent/AgentSidebar'
 
 // ── Recently Viewed (localStorage) ──
 
@@ -96,6 +98,7 @@ export default function KnowledgeView() {
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([])
   const [backlinksFor, setBacklinksFor] = useState<string | null>(null)
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
+  const [aiOverviewOpen, setAiOverviewOpen] = useState(true)
 
   const sortRef = useRef<HTMLDivElement>(null)
   const tagMenuRef = useRef<HTMLDivElement>(null)
@@ -857,6 +860,28 @@ export default function KnowledgeView() {
           </div>
         )}
       </div>
+
+      <aside className={`knowledge-ai-panel ${aiOverviewOpen ? 'open' : 'collapsed'}`}>
+        <button
+          onClick={() => setAiOverviewOpen((open) => !open)}
+          className="knowledge-ai-toggle"
+          title={aiOverviewOpen ? '收起 AI 总览' : '展开 AI 总览'}
+        >
+          {aiOverviewOpen ? (
+            <PanelRightClose className="w-3.5 h-3.5" />
+          ) : (
+            <PanelRightOpen className="w-3.5 h-3.5" />
+          )}
+        </button>
+        {aiOverviewOpen ? (
+          <AgentSidebar mode="knowledge" notes={notes} tags={allTags} />
+        ) : (
+          <div className="knowledge-ai-rail">
+            <Bot className="w-4 h-4" />
+            <span>AI</span>
+          </div>
+        )}
+      </aside>
 
       {/* New Note Dialog */}
       {newNoteDialogOpen && (

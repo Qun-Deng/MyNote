@@ -11,10 +11,12 @@ import TodoView from './components/todo/TodoView'
 import KnowledgeView from './components/knowledge/KnowledgeView'
 import MilkdownEditor, { setEditorVaultPath } from './components/editor/MilkdownEditor'
 import OutlineSidebar from './components/editor/OutlineSidebar'
+import AgentSidebar from './components/agent/AgentSidebar'
 import { useAutoSave } from './components/editor/useAutoSave'
 import VaultPrompt from './components/layout/VaultPrompt'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ArrowLeft, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { ArrowLeft, Bot, ListTree, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import type { AgentSelection } from '../shared/agent'
 
 function extractMarkdownTitle(content: string) {
   return content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null
@@ -152,6 +154,8 @@ function App() {
   const [titleDraft, setTitleDraft] = useState('')
   const [editorRevision, setEditorRevision] = useState(0)
   const [outlineOpen, setOutlineOpen] = useState(true)
+  const [rightPanelTab, setRightPanelTab] = useState<'outline' | 'ai'>('outline')
+  const [agentSelection, setAgentSelection] = useState<AgentSelection | null>(null)
   const prevActiveTabRef = useRef<string | null>(null)
 
   // ── Resizable sidebars ──
@@ -392,7 +396,15 @@ function App() {
   useEffect(() => {
     setTitleDraft(currentMeta?.title ?? '')
     setRenamingTitle(false)
+    setAgentSelection(null)
   }, [currentMeta?.path, currentMeta?.title])
+
+  const handleApplyAgentDraft = useCallback(async (nextContent: string) => {
+    if (!currentMeta) return
+    setContent(nextContent)
+    await saveNote()
+    setEditorRevision((revision) => revision + 1)
+  }, [currentMeta, saveNote, setContent])
 
   useEffect(() => {
     if (!isEditing) return
@@ -624,11 +636,30 @@ ${body}
                 >
                   📄 导出
                 </button>
+                {/* Outline/AI tabs — inline in header when panel is open */}
+                {outlineOpen && (
+                  <div className="editor-side-tabs-inline">
+                    <button
+                      onClick={() => setRightPanelTab('outline')}
+                      className={`editor-side-tab ${rightPanelTab === 'outline' ? 'active' : ''}`}
+                      title="大纲"
+                    >
+                      <ListTree className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setRightPanelTab('ai')}
+                      className={`editor-side-tab ${rightPanelTab === 'ai' ? 'active' : ''}`}
+                      title="AI"
+                    >
+                      <Bot className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
                 {/* Outline toggle */}
                 <button
                   onClick={() => setOutlineOpen(!outlineOpen)}
                   className="p-1 hover:bg-surface-200 rounded transition-colors"
-                  title={outlineOpen ? '折叠大纲' : '展开大纲'}
+                  title={outlineOpen ? '折叠右侧栏' : '展开右侧栏'}
                 >
                   {outlineOpen ? <PanelRightClose className="w-3.5 h-3.5 text-surface-500" /> : <PanelRightOpen className="w-3.5 h-3.5 text-surface-500" />}
                 </button>
@@ -642,6 +673,7 @@ ${body}
                     key={`${currentMeta.path}:${editorRevision}`}
                     content={currentContent}
                     onContentChange={(markdown) => setContent(markdown)}
+                    onSelectionChange={setAgentSelection}
                     onNavigate={async (pageName: string) => {
                       try {
                         const allNotes = await window.mynote.notes.list()
@@ -679,14 +711,28 @@ ${body}
                   />
                 </div>
 
-                {/* Outline sidebar */}
+                {/* Shared right sidebar */}
                 {outlineOpen && (
                   <>
                     <div
                       className="w-1 cursor-col-resize hover:bg-accent-400/40 active:bg-accent-400/60 transition-colors flex-shrink-0"
                       onMouseDown={() => setResizeTarget('outline')}
                     />
-                    <OutlineSidebar content={currentContent} width={outlineWidth} />
+                    <aside className="editor-side-panel" style={{ width: outlineWidth }}>
+                      <div className="editor-side-content">
+                        {rightPanelTab === 'outline' ? (
+                          <OutlineSidebar content={currentContent} embedded />
+                        ) : (
+                          <AgentSidebar
+                            mode="editor"
+                            currentNote={currentMeta}
+                            currentContent={currentContent}
+                            selectedText={agentSelection?.text ?? ''}
+                            onApplyDraft={handleApplyAgentDraft}
+                          />
+                        )}
+                      </div>
+                    </aside>
                   </>
                 )}
               </div>

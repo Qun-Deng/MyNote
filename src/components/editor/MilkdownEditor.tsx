@@ -13,6 +13,7 @@ import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { $prose } from '@milkdown/utils'
 import type { Ctx } from '@milkdown/ctx'
+import type { AgentSelection } from '../../../shared/agent'
 import {
   executeTableAction,
   executeEditorAction,
@@ -35,6 +36,7 @@ interface MilkdownEditorProps {
   onContentChange: (markdown: string) => void
   onNavigate?: (path: string) => void
   onTagClick?: (tag: string) => void
+  onSelectionChange?: (selection: AgentSelection | null) => void
   readOnly?: boolean
 }
 
@@ -841,7 +843,7 @@ function normalizeClickedTag(text: string) {
   return text.trim().toLowerCase()
 }
 
-export default function MilkdownEditor({ content, onContentChange, onNavigate, onTagClick, readOnly = false }: MilkdownEditorProps) {
+export default function MilkdownEditor({ content, onContentChange, onNavigate, onTagClick, onSelectionChange, readOnly = false }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const tableActionLockRef = useRef(false)
@@ -851,6 +853,8 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
   onNavigateRef.current = onNavigate
   const onTagClickRef = useRef(onTagClick)
   onTagClickRef.current = onTagClick
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  onSelectionChangeRef.current = onSelectionChange
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [tableAddControls, setTableAddControls] = useState<{
@@ -875,6 +879,28 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
   }
 
   const closeTableAddControls = () => setTableAddControls(null)
+
+  const syncSelection = () => {
+    const callback = onSelectionChangeRef.current
+    if (!callback) return
+    const editor = editorRef.current
+    if (!editor) {
+      callback(null)
+      return
+    }
+    try {
+      const view = editor.ctx.get(editorViewCtx)
+      const { from, to, empty } = view.state.selection
+      if (empty || from === to) {
+        callback(null)
+        return
+      }
+      const text = view.state.doc.textBetween(from, to, '\n', '\n').trim()
+      callback(text ? { text, from, to } : null)
+    } catch {
+      callback(null)
+    }
+  }
 
   const syncSlashMenu = () => {
     const editor = editorRef.current
@@ -1072,6 +1098,7 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
         className="milkdown-editor-container"
         data-readonly={readOnly}
         onMouseMove={syncTableAddControls}
+        onMouseUp={() => window.setTimeout(syncSelection)}
         onKeyDownCapture={handleKeyDownCapture}
         onMouseDown={(event) => {
           const target = event.target
@@ -1118,8 +1145,13 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
         }}
         onKeyUp={(event) => {
           // Don't sync on navigation/action keys — avoids resetting selection in slash menu
-          if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'ArrowDown' || event.key === 'ArrowUp') return
+          if (event.key === 'Escape' || event.key === 'Enter') return
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            window.setTimeout(syncSelection)
+            return
+          }
           window.setTimeout(syncSlashMenu)
+          window.setTimeout(syncSelection)
         }}
       />
 
