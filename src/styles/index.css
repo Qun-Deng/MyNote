@@ -12,7 +12,9 @@
 
   body {
     @apply bg-surface-50 text-surface-800;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Times New Roman', '宋体', SimSun, serif;
+    font-size: 14px;
+    line-height: 1.45;
     overflow: hidden;
     user-select: none;
   }
@@ -122,6 +124,7 @@
 }
 
 [data-theme="dark"] body {
+  font-family: 'Times New Roman', '宋体', SimSun, serif;
   background-color: #0f172a;
   color: #e2e8f0;
 }
@@ -788,8 +791,8 @@
   overflow-wrap: anywhere;
   border-radius: 8px;
   padding: 8px 9px;
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .agent-message.user .agent-message-content {
@@ -847,7 +850,7 @@
   background: var(--color-surface-50, #fafafa);
   padding: 8px;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--color-surface-700, #374151);
@@ -1013,7 +1016,7 @@
 
 .agent-muted {
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.4;
   color: var(--color-surface-400, #9ca3af);
 }
 
@@ -1055,7 +1058,7 @@
 .agent-config-note {
   margin-top: 3px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--color-surface-400, #9ca3af);
 }
 
