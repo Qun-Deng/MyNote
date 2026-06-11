@@ -16,7 +16,9 @@ import { useAutoSave } from './components/editor/useAutoSave'
 import VaultPrompt from './components/layout/VaultPrompt'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ArrowLeft, Bot, ListTree, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
-import type { AgentSelection } from '../shared/agent'
+import type { AgentSelection, AgentDraft, LinkedNoteContent } from '../shared/agent'
+import type { Backlink } from '../shared/types'
+import { truncateNoteContent } from './components/agent/agentClient'
 
 function extractMarkdownTitle(content: string) {
   return content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null
@@ -156,6 +158,8 @@ function App() {
   const [outlineOpen, setOutlineOpen] = useState(true)
   const [rightPanelTab, setRightPanelTab] = useState<'outline' | 'ai'>('outline')
   const [agentSelection, setAgentSelection] = useState<AgentSelection | null>(null)
+  const [linkedNoteContents, setLinkedNoteContents] = useState<LinkedNoteContent[]>([])
+  const [linkedNotesLoading, setLinkedNotesLoading] = useState(false)
   const prevActiveTabRef = useRef<string | null>(null)
 
   // ── Resizable sidebars ──
@@ -399,12 +403,82 @@ function App() {
     setAgentSelection(null)
   }, [currentMeta?.path, currentMeta?.title])
 
-  const handleApplyAgentDraft = useCallback(async (nextContent: string) => {
+  // Fetch linked notes for AI enriched context (editor mode)
+  useEffect(() => {
+    if (!currentMeta) {
+      setLinkedNoteContents([])
+      setLinkedNotesLoading(false)
+      return
+    }
+
+    let cancelled = false
+
+    const fetchLinkedNotes = async () => {
+      setLinkedNotesLoading(true)
+      try {
+        const [backlinks, forwardLinkPaths] = await Promise.all([
+          window.mynote.notes.backlinks(currentMeta.path).catch(() => [] as Backlink[]),
+          window.mynote.notes.forwardLinks(currentMeta.path).catch(() => [] as string[]),
+        ])
+
+        if (cancelled) return
+
+        // Collect unique linked paths, excluding self
+        const allLinkedPaths = new Set([
+          ...backlinks.map((b: any) => b.from_path),
+          ...forwardLinkPaths,
+        ].filter((p: string) => p !== currentMeta.path))
+
+        const MAX_LINKED = 8
+        const pathsToFetch = Array.from(allLinkedPaths).slice(0, MAX_LINKED)
+        const results: LinkedNoteContent[] = []
+
+        for (const linkedPath of pathsToFetch) {
+          const note = await window.mynote.notes.read(linkedPath).catch(() => null)
+          if (!note || cancelled) continue
+          results.push({
+            path: linkedPath,
+            title: note.meta.title,
+            content: truncateNoteContent(note.content).content,
+            relation: backlinks.some((b: any) => b.from_path === linkedPath) ? 'backlink' : 'forward_link',
+          })
+        }
+
+        if (!cancelled) setLinkedNoteContents(results)
+      } catch (err) {
+        console.error('Failed to fetch linked notes for AI context:', err)
+      } finally {
+        if (!cancelled) setLinkedNotesLoading(false)
+      }
+    }
+
+    const timer = setTimeout(fetchLinkedNotes, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [currentMeta?.path])
+
+  const handleApplyAgentDraft = useCallback(async (draft: AgentDraft) => {
+    // Phase 3: create a new note
+    if (draft.action === 'create_new_note') {
+      const folder = draft.newNoteFolder || 'notes'
+      const title = draft.newNoteTitle || '未命名笔记'
+      try {
+        const meta = await window.mynote.notes.create(folder, title)
+        await window.mynote.notes.write(meta.path, draft.nextContent)
+        await refreshTree()
+        const opened = await openNote(meta.path)
+        if (opened) setOpenNotePath(meta.path)
+      } catch (err) {
+        alert(err instanceof Error ? err.message : '创建笔记失败')
+      }
+      return
+    }
+
+    // Existing: modify current note
     if (!currentMeta) return
-    setContent(nextContent)
+    setContent(draft.nextContent)
     await saveNote()
     setEditorRevision((revision) => revision + 1)
-  }, [currentMeta, saveNote, setContent])
+  }, [currentMeta, saveNote, setContent, openNote, setOpenNotePath, refreshTree])
 
   useEffect(() => {
     if (!isEditing) return
@@ -728,6 +802,8 @@ ${body}
                             currentNote={currentMeta}
                             currentContent={currentContent}
                             selectedText={agentSelection?.text ?? ''}
+                            linkedNoteContents={linkedNoteContents}
+                            contextLoading={linkedNotesLoading}
                             onApplyDraft={handleApplyAgentDraft}
                           />
                         )}
