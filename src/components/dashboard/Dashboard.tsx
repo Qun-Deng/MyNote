@@ -390,7 +390,7 @@ export default function Dashboard() {
                       key={item.id}
                       className="flex items-center gap-2 py-1 text-sm text-surface-700 group hover:bg-surface-50 rounded px-1 transition-colors"
                     >
-                      <button onClick={() => handleTodoToggle(item)} className="flex-shrink-0">
+                      <button onClick={() => handleTodoToggle(item)} className="flex-shrink-0 -translate-y-px">
                         {item.completed ? (
                           <Check className="w-4 h-4 text-emerald-500" />
                         ) : (

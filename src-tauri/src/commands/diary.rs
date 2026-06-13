@@ -292,17 +292,22 @@ fn parse_diary_todo_section(content: &str) -> Vec<(String, bool)> {
     items
 }
 
+/// Check whether a line is a todo checkbox line: `- [ ]`, `- [x]`, `* [x]`, `+ [X]`, etc.
+fn is_checkbox_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("- [ ]") || t.starts_with("- [x]") || t.starts_with("- [X]")
+        || t.starts_with("* [ ]") || t.starts_with("* [x]") || t.starts_with("* [X]")
+        || t.starts_with("+ [ ]") || t.starts_with("+ [x]") || t.starts_with("+ [X]")
+}
+
 /// Replace or insert the `## [待办事项]` section in markdown content.
+/// Preserves non-checkbox content (images, text, etc.) — only checkbox lines are replaced.
 fn replace_diary_todo_section(content: &str, items: &[(String, bool)]) -> String {
-    let mut new_section = String::from("## [待办事项]\n");
-    if items.is_empty() {
-        new_section.push('\n');
-    } else {
-        for (text, completed) in items {
-            let marker = if *completed { "[x]" } else { "[ ]" };
-            new_section.push_str(&format!("- {} {}\n", marker, text));
-        }
-        new_section.push('\n');
+    // Build the TODO block from page items
+    let mut todo_block = String::new();
+    for (text, completed) in items {
+        let marker = if *completed { "[x]" } else { "[ ]" };
+        todo_block.push_str(&format!("- {} {}\n", marker, text));
     }
 
     // Match ## [待办事项] or ## \[待办事项\] on original content
@@ -319,6 +324,37 @@ fn replace_diary_todo_section(content: &str, items: &[(String, bool)]) -> String
             None => content.len(),
         };
 
+        let section_body = &content[after_header..section_end];
+
+        // Preserve non-checkbox lines from the existing section
+        let mut preserved = Vec::new();
+        for line in section_body.lines() {
+            if is_checkbox_line(line) {
+                continue; // replaced by page items
+            }
+            preserved.push(line.to_string());
+        }
+
+        // Build new section body
+        let mut new_body = String::new();
+        for p in &preserved {
+            new_body.push_str(p);
+            new_body.push('\n');
+        }
+        new_body.push_str(&todo_block);
+
+        // Ensure section body ends with a blank line before next heading
+        if !new_body.ends_with('\n') {
+            new_body.push('\n');
+        }
+        // If the preserved content already left a blank line, don't double up too much
+        // but ensure at least one newline before next section
+        if !new_body.ends_with("\n\n") {
+            new_body.push('\n');
+        }
+
+        let new_section = format!("## [待办事项]\n{}", new_body);
+
         let mut end = section_end;
         while end > after_header && content.as_bytes().get(end - 1) == Some(&b'\n') {
             end -= 1;
@@ -327,6 +363,14 @@ fn replace_diary_todo_section(content: &str, items: &[(String, bool)]) -> String
         format!("{}{}{}", &content[..section_start], new_section, &content[end..])
     } else {
         // No [待办事项] section — insert after the title (# header)
+        let mut new_section = String::from("## [待办事项]\n");
+        if items.is_empty() {
+            new_section.push('\n');
+        } else {
+            new_section.push_str(&todo_block);
+            new_section.push('\n');
+        }
+
         let title_re = regex::Regex::new(r"(?m)^#\s+.+$").unwrap();
         if let Some(title_match) = title_re.find(content) {
             let title_end = title_match.end();

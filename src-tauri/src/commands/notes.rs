@@ -129,7 +129,7 @@ pub fn notes_write(state: State<AppState>, request: NoteWriteRequest) -> Result<
 // ── notes_create ──
 
 #[tauri::command]
-pub fn notes_create(state: State<AppState>, folder_path: String, title: String) -> Result<vault::NoteMeta, String> {
+pub fn notes_create(state: State<AppState>, folder_path: String, title: String, overwrite: Option<bool>) -> Result<vault::NoteMeta, String> {
     let vault_path = state.vault_path.lock().map_err(|e| e.to_string())?;
     let vp = match vault_path.as_ref() {
         Some(p) => p.clone(),
@@ -144,7 +144,7 @@ pub fn notes_create(state: State<AppState>, folder_path: String, title: String) 
     };
 
     let full_path = PathBuf::from(&vp).join(&file_path);
-    if full_path.exists() {
+    if full_path.exists() && !overwrite.unwrap_or(false) {
         return Err(format!("Note already exists: {}", file_path));
     }
 

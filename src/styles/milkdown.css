@@ -427,7 +427,7 @@
   content: "";
   position: absolute;
   left: -1.4em;
-  top: 0.5em;
+  top: 0.3em;
   box-sizing: border-box;
   width: 1em;
   height: 1em;
@@ -462,6 +462,8 @@
   height: 1em;
   accent-color: #7d8f8a;
   cursor: pointer;
+  vertical-align: baseline;
+  transform: translateY(0.1em);
 }
 
 .milkdown-editor-container .ProseMirror p.is-editor-empty:first-child::before {

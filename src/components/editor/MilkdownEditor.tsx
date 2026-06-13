@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
@@ -336,6 +336,9 @@ const tagHighlightPluginKey = new PluginKey('mdTagHighlight')
 const TAG_REGEX = /(\\?\[#)([^\]#\\\s]+)(\])/g
 
 function buildTagDecorations(doc: ProseNode) {
+  // Early exit: skip full doc walk if no [# tags present
+  if (!doc.textContent.includes('[#')) return DecorationSet.empty
+
   const decos: Decoration[] = []
 
   doc.descendants((node: ProseNode, pos: number) => {
@@ -393,6 +396,9 @@ const wikilinkPluginKey = new PluginKey('mdWikilink')
 const WIKILINK_REGEX = /\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]/g
 
 function buildWikilinkDecorations(doc: ProseNode) {
+  // Early exit: skip full doc walk if no [[ links present
+  if (!doc.textContent.includes('[[')) return DecorationSet.empty
+
   const decos: Decoration[] = []
 
   doc.descendants((node: ProseNode, pos: number) => {
@@ -472,6 +478,9 @@ function createMathPreview(
 }
 
 function buildMathDecorations(doc: ProseNode, selection: { from: number; to: number; empty: boolean }) {
+  // Early exit: skip full doc walk if no $ math markers
+  if (!doc.textContent.includes('$')) return DecorationSet.empty
+
   const decos: Decoration[] = []
 
   doc.descendants((node: ProseNode, pos: number) => {
@@ -843,7 +852,7 @@ function normalizeClickedTag(text: string) {
   return text.trim().toLowerCase()
 }
 
-export default function MilkdownEditor({ content, onContentChange, onNavigate, onTagClick, onSelectionChange, readOnly = false }: MilkdownEditorProps) {
+const MilkdownEditorImpl = ({ content, onContentChange, onNavigate, onTagClick, onSelectionChange, readOnly = false }: MilkdownEditorProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const tableActionLockRef = useRef(false)
@@ -939,40 +948,47 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
     }
   }
 
+  const rafRef = useRef<number | null>(null)
+
   const syncTableAddControls = (event: ReactMouseEvent<HTMLDivElement>) => {
-    const editor = editorRef.current
-    const shell = containerRef.current?.parentElement
-    const target = event.target
-    if (!editor || !shell || !(target instanceof HTMLElement)) return
-    if (target.closest('.md-table-edge-control')) return
+    // Throttle to ~30fps via requestAnimationFrame to avoid layout thrashing
+    if (rafRef.current) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      const editor = editorRef.current
+      const shell = containerRef.current?.parentElement
+      const target = event.target
+      if (!editor || !shell || !(target instanceof HTMLElement)) return
+      if (target.closest('.md-table-edge-control')) return
 
-    const cell = target.closest<HTMLElement>('td, th')
-    if (!cell) {
-      closeTableAddControls()
-      return
-    }
+      const cell = target.closest<HTMLElement>('td, th')
+      if (!cell) {
+        closeTableAddControls()
+        return
+      }
 
-    const cellPos = getTableCellPosition(editor, cell, {
-      left: event.clientX,
-      top: event.clientY,
-    })
-    if (cellPos === false) {
-      closeTableAddControls()
-      return
-    }
+      const cellPos = getTableCellPosition(editor, cell, {
+        left: event.clientX,
+        top: event.clientY,
+      })
+      if (cellPos === false) {
+        closeTableAddControls()
+        return
+      }
 
-    const shellRect = shell.getBoundingClientRect()
-    const cellRect = cell.getBoundingClientRect()
-    setTableAddControls({
-      cellPos,
-      rowDeleteLeft: cellRect.left - shellRect.left,
-      rowDeleteTop: cellRect.top + cellRect.height / 2 - shellRect.top,
-      rowLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
-      rowTop: cellRect.bottom - shellRect.top,
-      colDeleteLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
-      colDeleteTop: cellRect.top - shellRect.top,
-      colLeft: cellRect.right - shellRect.left,
-      colTop: cellRect.top + cellRect.height / 2 - shellRect.top,
+      const shellRect = shell.getBoundingClientRect()
+      const cellRect = cell.getBoundingClientRect()
+      setTableAddControls({
+        cellPos,
+        rowDeleteLeft: cellRect.left - shellRect.left,
+        rowDeleteTop: cellRect.top + cellRect.height / 2 - shellRect.top,
+        rowLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
+        rowTop: cellRect.bottom - shellRect.top,
+        colDeleteLeft: cellRect.left + cellRect.width / 2 - shellRect.left,
+        colDeleteTop: cellRect.top - shellRect.top,
+        colLeft: cellRect.right - shellRect.left,
+        colTop: cellRect.top + cellRect.height / 2 - shellRect.top,
+      })
     })
   }
 
@@ -1256,3 +1272,5 @@ export default function MilkdownEditor({ content, onContentChange, onNavigate, o
     </div>
   )
 }
+
+export default memo(MilkdownEditorImpl)
