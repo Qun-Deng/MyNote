@@ -172,7 +172,7 @@ export default function TodoView() {
       key={item.id}
       className="flex items-center gap-3 px-3 py-2 rounded-md group hover:bg-surface-50 transition-colors"
     >
-      <button onClick={() => handleToggle(item)} className="flex-shrink-0">
+      <button onClick={() => handleToggle(item)} className="flex-shrink-0 -translate-y-px">
         {item.completed ? (
           <Check className="w-4 h-4 text-emerald-500" />
         ) : (

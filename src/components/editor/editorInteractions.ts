@@ -634,6 +634,9 @@ export function getSlashTrigger(editor: Editor, container: HTMLElement): SlashTr
   if (!selection.empty) return null
 
   const { $from } = selection
+  // Quick early exit: skip expensive coordsAtPos if no / in current block
+  if (!$from.parent.textContent.includes('/')) return null
+
   const textBeforeCursor = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
   const match = textBeforeCursor.match(/(?:^|\s)\/([\p{L}\p{N}_-]*)$/u)
   if (!match) return null

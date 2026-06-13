@@ -462,7 +462,7 @@ function App() {
       const folder = draft.newNoteFolder || 'notes'
       const title = draft.newNoteTitle || '未命名笔记'
       try {
-        const meta = await window.mynote.notes.create(folder, title)
+        const meta = await window.mynote.notes.create(folder, title, true)
         await window.mynote.notes.write(meta.path, draft.nextContent)
         await refreshTree()
         const opened = await openNote(meta.path)
@@ -476,9 +476,9 @@ function App() {
     // Existing: modify current note
     if (!currentMeta) return
     setContent(draft.nextContent)
-    await saveNote()
+    await flush()  // flush cancels auto-save timer + writes immediately (avoids double-write)
     setEditorRevision((revision) => revision + 1)
-  }, [currentMeta, saveNote, setContent, openNote, setOpenNotePath, refreshTree])
+  }, [currentMeta, flush, setContent, openNote, setOpenNotePath, refreshTree])
 
   useEffect(() => {
     if (!isEditing) return

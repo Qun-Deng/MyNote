@@ -83,8 +83,8 @@ const notesApi = {
   read: (filePath: string) => invoke<any | null>('notes_read', { path: filePath }),
   write: (filePath: string, content: string) =>
     invoke('notes_write', { request: { path: filePath, content } }),
-  create: (folderPath: string, title: string) =>
-    invoke<any>('notes_create', { folderPath, title }),
+  create: (folderPath: string, title: string, overwrite?: boolean) =>
+    invoke<any>('notes_create', { folderPath, title, overwrite: overwrite ?? false }),
   delete: (filePath: string) => invoke('notes_delete', { path: filePath }),
   rename: (oldPath: string, newPath: string) =>
     invoke<string>('notes_rename', { oldPath, newPath }),

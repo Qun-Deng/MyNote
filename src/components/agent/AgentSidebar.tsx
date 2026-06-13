@@ -558,19 +558,9 @@ export default function AgentSidebar({
 
       {/* Selected notes summary (knowledge AI context mode) */}
       {!isEditor && selectedNoteContents && selectedNoteContents.length > 0 && (
-        <div className="agent-note-list">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Bot className="w-3 h-3 text-emerald-500" />
-            <span className="text-xs text-surface-500 font-medium">
-              AI 上下文 ({selectedNoteContents.length} 篇)
-            </span>
-          </div>
-          {selectedNoteContents.map((n) => (
-            <div key={n.meta.path} className="agent-note-row">
-              <span>{n.meta.title}</span>
-              <small>{n.meta.path}</small>
-            </div>
-          ))}
+        <div className="agent-context-ready">
+          <Bot className="w-3 h-3" />
+          <span>已选择 {selectedNoteContents.length} 篇笔记</span>
         </div>
       )}
 
